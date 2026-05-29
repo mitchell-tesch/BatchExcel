@@ -1,0 +1,96 @@
+﻿<ui:FluentWindow x:Class="BatchExcel.Views.AboutDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="About BatchExcel"
+        Height="550" Width="500"
+        WindowStartupLocation="CenterOwner"
+        WindowBackdropType="Mica"
+        ExtendsContentIntoTitleBar="True"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        FontFamily="{StaticResource UiFontFamily}"
+        FontSize="13"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType"
+        Icon="/Resources/app_icon.ico">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <ui:TitleBar Grid.Row="0"
+                     Title="About BatchExcel"
+                     ShowMaximize="False"
+                     ShowMinimize="False">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="/Resources/app_icon.png" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+        <Grid Grid.Row="1" Margin="24,12,24,16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <ui:Card Grid.Row="0" Padding="18,16">
+                <StackPanel Orientation="Horizontal">
+                    <Image Source="/Resources/app_icon.png"
+                           Width="64" Height="64"
+                           Margin="0,0,16,0"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           UseLayoutRounding="True"
+                           SnapsToDevicePixels="True" />
+                    <StackPanel VerticalAlignment="Center">
+                        <ui:TextBlock Text="BatchExcel" FontTypography="TitleLarge" />
+                        <ui:TextBlock Text="Parallel Excel Batch Processor"
+                                      FontTypography="Caption"
+                                      Appearance="Secondary" />
+                        <ui:TextBlock x:Name="VersionText"
+                                      FontTypography="Caption"
+                                      Appearance="Tertiary"
+                                      Margin="0,4,0,0" />
+                    </StackPanel>
+                </StackPanel>
+            </ui:Card>
+            <StackPanel Grid.Row="1" Margin="2,18,2,0">
+                <ui:TextBlock TextWrapping="Wrap" Margin="0,0,0,12">
+                    High-performance parallel batch processing for Excel calculation spreadsheets.
+                    Drives multiple Excel instances simultaneously to process large volumes of
+                    engineering calculations.
+                </ui:TextBlock>
+                <TextBlock Text="BUILT WITH" Style="{StaticResource SectionLabelText}" Margin="0,8,0,6" />
+                <ui:TextBlock Text="* .NET 10 / WPF" Margin="2,0,0,2" />
+                <ui:TextBlock Text="* CommunityToolkit.Mvvm" Margin="2,0,0,2" />
+                <ui:TextBlock Text="* WPF-UI 4.3 (Fluent Design)" Margin="2,0,0,2" />
+                <ui:TextBlock Text="* ClosedXML / DocumentFormat.OpenXml" Margin="2,0,0,2" />
+                <TextBlock Text="LINKS" Style="{StaticResource SectionLabelText}" Margin="0,14,0,6" />
+                <StackPanel Orientation="Horizontal">
+                    <ui:HyperlinkButton Content="BatchExcel on GitHub"
+                                        Icon="{ui:SymbolIcon Symbol=Code24}"
+                                        NavigateUri="https://github.com/mitchell-tesch/BatchExcel"
+                                        Margin="0,0,8,0" />
+                    <ui:HyperlinkButton Content="WPF-UI"
+                                        Icon="{ui:SymbolIcon Symbol=Open24}"
+                                        NavigateUri="https://github.com/lepoco/wpfui" />
+                </StackPanel>
+                <TextBlock Text="LICENSE" Style="{StaticResource SectionLabelText}" Margin="0,14,0,6" />
+                <ui:TextBlock TextWrapping="Wrap" Margin="2,0,0,4">
+                    <Run Text="Released under the " />
+                    <Hyperlink NavigateUri="https://github.com/mitchell-tesch/BatchExcel/blob/main/LICENSE"
+                               RequestNavigate="Hyperlink_RequestNavigate">MIT License</Hyperlink>
+                    <Run Text=". Copyright © 2026 Mitchell Tesch." />
+                </ui:TextBlock>
+            </StackPanel>
+            <ui:Button Grid.Row="2"
+                       Content="OK"
+                       MinWidth="96"
+                       HorizontalAlignment="Right"
+                       Margin="0,16,0,0"
+                       Appearance="Primary"
+                       IsDefault="True"
+                       IsCancel="True"
+                       Click="OkButton_Click" />
+        </Grid>
+    </Grid>
+</ui:FluentWindow>

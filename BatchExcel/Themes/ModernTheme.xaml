@@ -1,0 +1,87 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <FontFamily x:Key="UiFontFamily">Segoe UI Variable Display, Segoe UI</FontFamily>
+    <FontFamily x:Key="MonoFontFamily">Cascadia Mono, Consolas</FontFamily>
+    <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    <!-- ============================================================
+         Excel-green accent palette override
+         These keys override the WPF-UI defaults loaded earlier in
+         App.xaml so anything using the system accent (Primary buttons,
+         focus rings, toggle switches, progress bars, hyperlinks, ...)
+         picks up our brand colour instead of the Windows system accent.
+         ============================================================ -->
+    <Color x:Key="ExcelGreenColor">#1F7A47</Color>
+    <Color x:Key="ExcelGreenHoverColor">#176338</Color>
+    <Color x:Key="ExcelGreenPressedColor">#114E2C</Color>
+    <SolidColorBrush x:Key="ExcelGreenBrush"        Color="{StaticResource ExcelGreenColor}" />
+    <SolidColorBrush x:Key="ExcelGreenHoverBrush"   Color="{StaticResource ExcelGreenHoverColor}" />
+    <SolidColorBrush x:Key="ExcelGreenPressedBrush" Color="{StaticResource ExcelGreenPressedColor}" />
+    <!-- WPF-UI accent palette (system accent overrides) -->
+    <Color x:Key="SystemAccentColor">#1F7A47</Color>
+    <Color x:Key="SystemAccentColorPrimary">#1F7A47</Color>
+    <Color x:Key="SystemAccentColorSecondary">#176338</Color>
+    <Color x:Key="SystemAccentColorTertiary">#114E2C</Color>
+    <SolidColorBrush x:Key="SystemAccentBrush"               Color="{StaticResource SystemAccentColor}" />
+    <SolidColorBrush x:Key="SystemAccentColorPrimaryBrush"   Color="{StaticResource SystemAccentColorPrimary}" />
+    <SolidColorBrush x:Key="SystemAccentColorSecondaryBrush" Color="{StaticResource SystemAccentColorSecondary}" />
+    <SolidColorBrush x:Key="SystemAccentColorTertiaryBrush"  Color="{StaticResource SystemAccentColorTertiary}" />
+    <!-- Fluent fill colour brushes used by Primary buttons, toggles, sliders, etc. -->
+    <SolidColorBrush x:Key="AccentFillColorDefaultBrush"   Color="{StaticResource ExcelGreenColor}" />
+    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="{StaticResource ExcelGreenHoverColor}" />
+    <SolidColorBrush x:Key="AccentFillColorTertiaryBrush"  Color="{StaticResource ExcelGreenPressedColor}" />
+    <SolidColorBrush x:Key="AccentFillColorDisabledBrush"  Color="#80AFAFAF" />
+    <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush"   Color="{StaticResource ExcelGreenColor}" />
+    <SolidColorBrush x:Key="AccentTextFillColorSecondaryBrush" Color="{StaticResource ExcelGreenHoverColor}" />
+    <SolidColorBrush x:Key="AccentTextFillColorTertiaryBrush"  Color="{StaticResource ExcelGreenPressedColor}" />
+    <SolidColorBrush x:Key="AccentTextFillColorDisabledBrush"  Color="#80AFAFAF" />
+    <!-- ============================================================
+         Typography helpers
+         ============================================================ -->
+    <Style x:Key="HeadingText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource UiFontFamily}" />
+        <Setter Property="FontSize" Value="22" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Ideal" />
+    </Style>
+    <Style x:Key="SubheadingText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource UiFontFamily}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Opacity" Value="0.7" />
+    </Style>
+    <Style x:Key="SectionLabelText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource UiFontFamily}" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Opacity" Value="0.65" />
+        <Setter Property="Margin" Value="4,0,0,6" />
+    </Style>
+    <!-- ============================================================
+         Dark console-style log textbox
+         ============================================================ -->
+    <Style x:Key="LogTextBox" TargetType="TextBox">
+        <Setter Property="FontFamily" Value="{StaticResource MonoFontFamily}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Background" Value="#1B1F23" />
+        <Setter Property="Foreground" Value="#E6EAEE" />
+        <Setter Property="BorderBrush" Value="#1B1F23" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="10" />
+        <Setter Property="CaretBrush" Value="#E6EAEE" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Padding="{TemplateBinding Padding}"
+                                      Focusable="False"
+                                      Background="Transparent" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

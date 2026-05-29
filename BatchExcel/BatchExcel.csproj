@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>WinExe</OutputType>
+        <TargetFramework>net10.0-windows</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <UseWPF>true</UseWPF>
+        <ApplicationIcon>Resources\app_icon.ico</ApplicationIcon>
+        <Version>1.0.0</Version>
+        <AssemblyVersion>1.0.0.0</AssemblyVersion>
+        <FileVersion>1.0.0.0</FileVersion>
+        <Authors>Mitchell Tesch</Authors>
+        <Product>BatchExcel</Product>
+        <Copyright>Copyright © 2026 Mitchell Tesch</Copyright>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="ClosedXML" Version="0.105.0" />
+        <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+        <!-- Pinned explicitly so a future ClosedXML drop doesn't silently change the
+             version we write OpenXML against (used by BatchWorkbookReader, TemplateHeaderWriter). -->
+        <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.1" />
+        <PackageReference Include="WPF-UI" Version="4.3.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="Resources\BatchExcel_template.xlsx">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+        <Resource Include="Resources\app_icon.ico" />
+        <Resource Include="Resources\app_icon.png" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="BatchExcel.Tests" />
+    </ItemGroup>
+
+</Project>

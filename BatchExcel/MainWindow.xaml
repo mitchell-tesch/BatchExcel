@@ -1,0 +1,209 @@
+﻿<ui:FluentWindow x:Class="BatchExcel.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:vm="clr-namespace:BatchExcel.ViewModels"
+        mc:Ignorable="d"
+        Title="BatchExcel"
+        Height="680" Width="960"
+        MinHeight="520" MinWidth="780"
+        WindowStartupLocation="CenterScreen"
+        WindowBackdropType="Mica"
+        ExtendsContentIntoTitleBar="True"
+        Icon="Resources/app_icon.ico"
+        FontFamily="{StaticResource UiFontFamily}"
+        FontSize="13"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType"
+        Closing="Window_Closing">
+    <ui:FluentWindow.DataContext>
+        <vm:MainViewModel />
+    </ui:FluentWindow.DataContext>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <ui:TitleBar Grid.Row="0" Title="BatchExcel">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="/Resources/app_icon.png" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+        <Menu Grid.Row="1" Background="Transparent" Padding="16,4,16,4">
+            <MenuItem Header="_File">
+                <MenuItem Header="_New Batcher from Template"
+                          Command="{Binding NewFromBatcherTemplateCommand}"
+                          Icon="{ui:SymbolIcon Symbol=DocumentAdd24}" />
+                <MenuItem Header="_Open Batcher..."
+                          Command="{Binding BrowseFileCommand}"
+                          Icon="{ui:SymbolIcon Symbol=FolderOpen24}" />
+                <MenuItem Header="Open in _Excel"
+                          Command="{Binding OpenBatcherInExcelCommand}"
+                          Icon="{ui:SymbolIcon Symbol=Open24}" />
+                <Separator />
+                <MenuItem Header="_Save Log As..."
+                          Command="{Binding SaveLogAsCommand}"
+                          Icon="{ui:SymbolIcon Symbol=Save24}" />
+                <Separator />
+                <MenuItem Header="E_xit"
+                          Click="Exit_Click"
+                          Icon="{ui:SymbolIcon Symbol=ArrowExit20}" />
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_About BatchExcel"
+                          Click="About_Click"
+                          Icon="{ui:SymbolIcon Symbol=Info24}" />
+            </MenuItem>
+        </Menu>
+        <Grid Grid.Row="2" Margin="20,8,20,16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,4,0,14">
+                <Image Source="/Resources/app_icon.png"
+                       Width="44" Height="44"
+                       Margin="0,0,12,0"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       UseLayoutRounding="True"
+                       SnapsToDevicePixels="True" />
+                <StackPanel VerticalAlignment="Center">
+                    <ui:TextBlock Text="BatchExcel" FontTypography="TitleLarge" />
+                    <ui:TextBlock Text="Parallel Excel Batch Processor"
+                                  FontTypography="Caption"
+                                  Appearance="Secondary" />
+                </StackPanel>
+            </StackPanel>
+            <StackPanel Grid.Row="1" Margin="0,0,0,12">
+                <TextBlock Text="BATCHER SPREADSHEET" Style="{StaticResource SectionLabelText}" />
+                <ui:Card Padding="14">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBox Grid.Column="0"
+                                    Text="{Binding BatcherFilePath, UpdateSourceTrigger=PropertyChanged}"
+                                    IsReadOnly="True"
+                                    PlaceholderText="Select a batcher workbook..."
+                                    Margin="0,0,10,0" />
+                        <ui:Button Grid.Column="1"
+                                   Content="Open in Excel"
+                                   Icon="{ui:SymbolIcon Symbol=Open24}"
+                                   Command="{Binding OpenBatcherInExcelCommand}"
+                                   Margin="0,0,8,0" />
+                        <ui:Button Grid.Column="2"
+                                   Content="Browse..."
+                                   Icon="{ui:SymbolIcon Symbol=FolderOpen24}"
+                                   Command="{Binding BrowseFileCommand}" />
+                    </Grid>
+                </ui:Card>
+            </StackPanel>
+            <StackPanel Grid.Row="2" Margin="0,0,0,12">
+                <TextBlock Text="BATCH SETTINGS" Style="{StaticResource SectionLabelText}" />
+                <ui:Card Padding="14">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="140" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBlock Grid.Column="0"
+                                      Text="Workers"
+                                      Appearance="Secondary"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,8,0" />
+                        <ui:NumberBox Grid.Column="1"
+                                      Value="{Binding WorkerCount, UpdateSourceTrigger=PropertyChanged}"
+                                      Minimum="1"
+                                      Maximum="64"
+                                      ClearButtonEnabled="False"
+                                      SpinButtonPlacementMode="Inline" />
+                        <ui:ToggleSwitch Grid.Column="2"
+                                         Content="Save Runs"
+                                         IsChecked="{Binding SaveRuns}"
+                                         VerticalAlignment="Center"
+                                         Margin="24,0,0,0" />
+                        <ui:TextBlock Grid.Column="3"
+                                      Text="PDF Sheets"
+                                      Appearance="Secondary"
+                                      VerticalAlignment="Center"
+                                      Margin="24,0,8,0" />
+                        <ui:TextBox Grid.Column="4"
+                                    Text="{Binding PdfSheets, UpdateSourceTrigger=PropertyChanged}"
+                                    PlaceholderText="Sheet1, Sheet2"
+                                    MinWidth="200"
+                                    ToolTip="Comma-separated sheet names to include in PDF" />
+                        <ui:Button Grid.Column="6"
+                                   Content="Start Batch"
+                                   Icon="{ui:SymbolIcon Symbol=Play24}"
+                                   Appearance="Primary"
+                                   Command="{Binding RunBatchCommand}"
+                                   Margin="16,0,8,0" />
+                        <ui:Button Grid.Column="7"
+                                   Content="Cancel"
+                                   Icon="{ui:SymbolIcon Symbol=Stop24}"
+                                   Appearance="Danger"
+                                   Command="{Binding CancelBatchCommand}" />
+                    </Grid>
+                </ui:Card>
+            </StackPanel>
+            <Grid Grid.Row="3" Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ui:ProgressRing Grid.Column="0"
+                                 Width="22" Height="22"
+                                 IsIndeterminate="True"
+                                 Margin="0,0,12,0"
+                                 Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}" />
+                <Grid Grid.Column="1">
+                    <ProgressBar Height="40"
+                                 Value="{Binding ProgressPercent, Mode=OneWay}"
+                                 Minimum="0" Maximum="100" />
+                    <TextBlock Text="{Binding ProgressText}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               FontSize="15"
+                               FontWeight="SemiBold" />
+                </Grid>
+            </Grid>
+            <Grid Grid.Row="4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="LOG OUTPUT" Style="{StaticResource SectionLabelText}" />
+                <ui:Card Grid.Row="1"
+                         Padding="2"
+                         HorizontalAlignment="Stretch"
+                         VerticalAlignment="Stretch">
+                    <TextBox Text="{Binding LogOutput, Mode=OneWay}"
+                             Style="{StaticResource LogTextBox}"
+                             IsReadOnly="True"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Auto"
+                             TextWrapping="NoWrap"
+                             AcceptsReturn="True"
+                             HorizontalAlignment="Stretch"
+                             VerticalAlignment="Stretch"
+                             MinHeight="180"
+                             x:Name="LogTextBox" />
+                </ui:Card>
+            </Grid>
+        </Grid>
+    </Grid>
+</ui:FluentWindow>
