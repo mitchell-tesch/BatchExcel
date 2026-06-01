@@ -68,7 +68,8 @@ public static class ExcelProcessTracker
     {
         try
         {
-            IntPtr hwnd = new IntPtr((int)excelApp.Hwnd);
+            // Use long for 64-bit safety; Excel.Application.Hwnd can exceed int.MaxValue.
+            IntPtr hwnd = new IntPtr((long)excelApp.Hwnd);
             GetWindowThreadProcessId(hwnd, out uint pid);
             return pid;
         }
@@ -157,6 +158,10 @@ public static class ExcelProcessTracker
         }
         finally
         {
+            // Ensure the local dynamic reference is cleared from the stack before collecting,
+            // otherwise the GC might still see it as a root.
+            excelApp = null;
+
             // Because we are relying entirely on the Garbage Collector to release RCWs,
             // we MUST use the "Double Tap" GC pattern. The first pass queues the finalizers
             // for root objects. The second pass cleans up transitively held COM objects 
