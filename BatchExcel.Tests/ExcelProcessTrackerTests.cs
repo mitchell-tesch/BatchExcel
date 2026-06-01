@@ -4,7 +4,10 @@ using Xunit;
 
 namespace BatchExcel.Tests;
 
-public class ExcelProcessTrackerTests
+// Use a collection to ensure these tests don't run in parallel with any other
+// tests that might use the static ExcelProcessTracker.
+[Collection("ExcelProcessTracker")]
+public class ExcelProcessTrackerTests : IDisposable
 {
     private class MockProcessInterop : IProcessInterop
     {
@@ -28,6 +31,13 @@ public class ExcelProcessTrackerTests
         {
             return RunningPids.Contains(pid) && processName == "EXCEL";
         }
+    }
+
+    public void Dispose()
+    {
+        // Reset the provider and clear tracking state after each test
+        ExcelProcessTracker.InteropProvider = new DefaultProcessInterop();
+        ExcelProcessTracker.KillAllTracked();
     }
 
     [Fact]
@@ -65,17 +75,10 @@ public class ExcelProcessTrackerTests
         uint pid = 999;
         mock.RunningPids.Add((int)pid);
         
-        // Simulate WaitForExit(3000) returning false (still running)
-        // In our mock, WaitForExit returns !RunningPids.Contains(pid).
-        // To simulate timeout, we can make it always return false for this PID 
-        // until Kill is called.
-        
         ExcelProcessTracker.InteropProvider = mock;
         ExcelProcessTracker.Track(pid);
         
-        // Mock dynamic excelApp
-        // We can't easily mock 'dynamic' without a real COM object or ExpandoObject,
-        // but SafeQuitExcel handles null/exceptions gracefully.
+        // Even with a null excelApp, the finally block should still kill the PID.
         ExcelProcessTracker.SafeQuitExcel(null, pid);
 
         // Should have checked if running, tried to wait, then killed
