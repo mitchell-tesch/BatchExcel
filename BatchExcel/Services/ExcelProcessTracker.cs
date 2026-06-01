@@ -1,7 +1,50 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace BatchExcel.Services;
+
+/// <summary>
+/// Abstraction for OS process interactions to enable deterministic testing.
+/// </summary>
+internal interface IProcessInterop
+{
+    void Kill(int pid);
+    bool WaitForExit(int pid, int timeoutMs);
+    bool IsRunning(int pid, string processName);
+}
+
+internal class DefaultProcessInterop : IProcessInterop
+{
+    public void Kill(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            process.Kill();
+        }
+        catch (ArgumentException) { /* Already exited */ }
+    }
+
+    public bool WaitForExit(int pid, int timeoutMs)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return process.WaitForExit(timeoutMs);
+        }
+        catch (ArgumentException) { return true; }
+    }
+
+    public bool IsRunning(int pid, string processName)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited && process.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException) { return false; }
+    }
+}
 
 /// <summary>
 /// Tracks Excel process IDs to enable reliable cleanup of zombie processes.
@@ -15,6 +58,8 @@ public static class ExcelProcessTracker
     private static readonly object Lock = new();
     private static readonly HashSet<uint> TrackedPids = new();
 
+    internal static IProcessInterop InteropProvider { get; set; } = new DefaultProcessInterop();
+
     /// <summary>
     /// Gets the OS process ID for an Excel Application COM object using its window handle.
     /// Returns 0 if the process ID cannot be resolved.
@@ -27,8 +72,9 @@ public static class ExcelProcessTracker
             GetWindowThreadProcessId(hwnd, out uint pid);
             return pid;
         }
-        catch
+        catch (Exception ex)
         {
+            Debug.WriteLine($"[ExcelProcessTracker] Failed to resolve PID: {ex.Message}");
             return 0;
         }
     }
@@ -38,6 +84,7 @@ public static class ExcelProcessTracker
     /// </summary>
     public static void Track(uint pid)
     {
+        if (pid == 0) return;
         lock (Lock)
         {
             TrackedPids.Add(pid);
@@ -49,6 +96,7 @@ public static class ExcelProcessTracker
     /// </summary>
     public static void Untrack(uint pid)
     {
+        if (pid == 0) return;
         lock (Lock)
         {
             TrackedPids.Remove(pid);
@@ -73,19 +121,14 @@ public static class ExcelProcessTracker
         {
             try
             {
-                using var process = Process.GetProcessById((int)pid);
-                if (!process.HasExited && process.ProcessName.Equals("EXCEL", StringComparison.OrdinalIgnoreCase))
+                if (InteropProvider.IsRunning((int)pid, "EXCEL"))
                 {
-                    process.Kill();
-                    process.WaitForExit(5000);
+                    InteropProvider.Kill((int)pid);
+                    InteropProvider.WaitForExit((int)pid, 5000);
                     killed++;
                 }
             }
-            catch (ArgumentException)
-            {
-                // Process already exited
-            }
-            catch (Exception)
+            catch
             {
                 // Best effort cleanup
             }
@@ -133,20 +176,19 @@ public static class ExcelProcessTracker
             {
                 try
                 {
-                    using var process = Process.GetProcessById((int)pid);
-                    if (!process.HasExited)
+                    if (InteropProvider.IsRunning((int)pid, "EXCEL"))
                     {
                         // Wait briefly for graceful shutdown
-                        if (!process.WaitForExit(3000))
+                        if (!InteropProvider.WaitForExit((int)pid, 3000))
                         {
-                            process.Kill();
-                            process.WaitForExit(5000);
+                            InteropProvider.Kill((int)pid);
+                            InteropProvider.WaitForExit((int)pid, 5000);
                         }
                     }
                 }
-                catch (ArgumentException)
+                catch
                 {
-                    // Already exited - good
+                    // Ignore cleanup errors
                 }
             }
 
@@ -154,4 +196,3 @@ public static class ExcelProcessTracker
         }
     }
 }
-

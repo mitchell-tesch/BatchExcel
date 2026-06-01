@@ -39,12 +39,6 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         dynamic? excelApp = null;
         uint pid = 0;
 
-        // Caches of COM references
-        Dictionary<string, dynamic>? sheetCache = null;
-        (dynamic sheet, dynamic range, int offset)[]? inputRangeCache = null;
-        dynamic[]? outputRangeCache = null;
-        dynamic? workbook = null;
-
         try
         {
             excelApp = CreateExcelInstance();
@@ -53,34 +47,9 @@ internal sealed class ExcelWorker(WorkerContext ctx)
 
             ctx.Log($"\t[Worker {ctx.WorkerId}] Excel started (PID: {pid})");
 
-            workbook = excelApp.Workbooks.Open(ctx.CalculationPath, UpdateLinks: false);
-            string calculationName = workbook.Name;
-
-            SetCalculationMode(excelApp, XlCalculationManual, ctx.WorkerId, ctx.Log);
-
-            sheetCache = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
-            inputRangeCache = BuildInputRangeCache(workbook, sheetCache);
-            outputRangeCache = BuildOutputRangeCache(workbook, sheetCache);
-
-            try
-            {
-                ProcessRunQueue(excelApp, workbook, calculationName, inputRangeCache, outputRangeCache);
-                workbook.Close(SaveChanges: false);
-            }
-            catch
-            {
-                try { workbook.Close(SaveChanges: false); }
-                catch
-                {
-                    // ignored
-                }
-
-                throw;
-            }
-            finally
-            {
-                workbook = null;
-            }
+            // Execute processing in a nested scope so local COM references 
+            // naturally go out of scope before we trigger the GC collection.
+            ExecuteRunLoop(excelApp);
         }
         catch (Exception ex)
         {
@@ -92,6 +61,40 @@ internal sealed class ExcelWorker(WorkerContext ctx)
 
             if (excelApp != null)
                 ExcelProcessTracker.SafeQuitExcel(excelApp, pid);
+        }
+    }
+
+    private void ExecuteRunLoop(dynamic excelApp)
+    {
+        dynamic? workbook = null;
+        try
+        {
+            workbook = excelApp.Workbooks.Open(ctx.CalculationPath, UpdateLinks: false);
+            string calculationName = workbook.Name;
+
+            SetCalculationMode(excelApp, XlCalculationManual, ctx.WorkerId, ctx.Log);
+
+            var sheetCache = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
+            var inputRangeCache = BuildInputRangeCache(workbook, sheetCache);
+            var outputRangeCache = BuildOutputRangeCache(workbook, sheetCache);
+
+            try
+            {
+                ProcessRunQueue(excelApp, workbook, calculationName, inputRangeCache, outputRangeCache);
+                workbook.Close(SaveChanges: false);
+            }
+            catch
+            {
+                try { workbook.Close(SaveChanges: false); }
+                catch { /* ignored */ }
+                throw;
+            }
+        }
+        finally
+        {
+            // The local variables 'workbook', 'sheetCache', etc. will go out of scope 
+            // when this method returns, making them eligible for collection.
+            workbook = null;
         }
     }
 

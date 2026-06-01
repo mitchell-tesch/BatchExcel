@@ -69,28 +69,6 @@ internal static class PdfExporter
             {
                 try { sheets[0].Select(); } catch { /* ignored */ }
             }
-
-            // Release every sheet RCW we acquired so Excel can shut down cleanly and we
-            // don't accumulate references across runs.
-            foreach (var s in sheets)
-            {
-                try
-                {
-                    if (s != null && Marshal.IsComObject(s))
-                        Marshal.FinalReleaseComObject(s);
-                }
-                catch { /* ignored */ }
-            }
-
-            if (app != null)
-            {
-                try
-                {
-                    if (Marshal.IsComObject(app))
-                        Marshal.FinalReleaseComObject(app);
-                }
-                catch { /* ignored */ }
-            }
         }
     }
 }
