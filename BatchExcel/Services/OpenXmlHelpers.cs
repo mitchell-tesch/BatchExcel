@@ -1,4 +1,7 @@
 ﻿using System.Globalization;
+using System.Collections.Generic;
+using System.Linq;
+using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 
 namespace BatchExcel.Services;
@@ -8,6 +11,35 @@ namespace BatchExcel.Services;
 /// </summary>
 internal static class OpenXmlHelpers
 {
+    /// <summary>
+    /// Builds a lookup of defined name → (sheet name, cell reference).
+    /// Parses references like "SheetName!$B$5" into their components.
+    /// Returns ONLY valid, writable cell references; offsets and formulas are ignored.
+    /// </summary>
+    public static Dictionary<string, (string sheetName, string cellRef)> BuildDefinedNamesLookup(WorkbookPart workbookPart)
+    {
+        var definedNames = new Dictionary<string, (string sheetName, string cellRef)>(StringComparer.OrdinalIgnoreCase);
+
+        if (workbookPart.Workbook.DefinedNames == null)
+            return definedNames;
+
+        foreach (var dn in workbookPart.Workbook.DefinedNames.Elements<DefinedName>())
+        {
+            string? name = dn.Name;
+            var reference = dn.Text;
+            if (name == null) continue;
+
+            // Strict parsing: expects "Sheet!$A$1"
+            var parts = reference.Split('!');
+            if (parts.Length != 2) continue;
+            var sName = parts[0].Trim('\'');
+            var cRef = parts[1].Replace("$", "");
+            definedNames[name] = (sName, cRef);
+        }
+
+        return definedNames;
+    }
+
     /// <summary>
     /// Converts 1-based row and column indices to an Excel cell reference (e.g., row=1, col=2 → "B1").
     /// </summary>

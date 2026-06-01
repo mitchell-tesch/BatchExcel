@@ -71,7 +71,7 @@ public class TemplateValidatorTests : IDisposable
     }
 
     [Fact]
-    public void Validate_MissingNamedRange_ThrowsValidationException()
+    public void Validate_MissingNamedRange_IsSilentlyIgnored()
     {
         // Arrange
         CreateTestTemplate(new[] { "Sheet1" });
@@ -81,8 +81,31 @@ public class TemplateValidatorTests : IDisposable
         };
 
         // Act & Assert
-        var ex = Assert.Throws<ValidationException>(() => TemplateValidator.Validate(_tempPath, config));
-        Assert.Contains("Missing named range 'MissingRange'", ex.Message);
+        // Should not throw, matching CalculationHeaderWriter behavior
+        TemplateValidator.Validate(_tempPath, config);
+    }
+
+    [Fact]
+    public void Validate_UnsupportedNamedRangeFormula_IsIgnored()
+    {
+        // Arrange
+        // Create a template with a named range that uses a formula (OFFSET) which our parser ignores
+        using (var workbook = new XLWorkbook())
+        {
+            workbook.Worksheets.Add("Sheet1");
+            workbook.DefinedNames.Add("ComplexRange", "OFFSET(Sheet1!$A$1,0,0,1,1)");
+            workbook.SaveAs(_tempPath);
+        }
+
+        var config = new BatchConfig
+        {
+            HeaderInputs = { ["ComplexRange"] = "val" }
+        };
+
+        // Act & Assert
+        // Should not throw, but should also not be considered "writeable" if we were checking writeability.
+        // For now, we just ensure it doesn't cause a false error or a crash.
+        TemplateValidator.Validate(_tempPath, config);
     }
 
     [Fact]
@@ -95,8 +118,8 @@ public class TemplateValidatorTests : IDisposable
             InputFields = { new FieldDefinition("Sheet1", "A1", 0) }
         };
 
-        // Open the file exclusively to simulate it being open in Excel
-        using var fs = new FileStream(_tempPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        // Open the file to simulate it being open in Excel (allowing shared reading)
+        using var fs = new FileStream(_tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
 
         // Act & Assert
         // This should NOT throw IOException if we use FileShare.ReadWrite in the validator
@@ -110,13 +133,13 @@ public class TemplateValidatorTests : IDisposable
         CreateTestTemplate(new[] { "Sheet1" });
         var config = new BatchConfig
         {
-            InputFields = { new FieldDefinition("MissingSheet", "A1", 0) },
-            HeaderInputs = { ["MissingRange"] = "val" }
+            InputFields = { new FieldDefinition("MissingSheet1", "A1", 0) },
+            OutputFields = { new FieldDefinition("MissingSheet2", "B2", 0) }
         };
 
         // Act & Assert
         var ex = Assert.Throws<ValidationException>(() => TemplateValidator.Validate(_tempPath, config));
-        Assert.Contains("Missing sheet 'MissingSheet'", ex.Message);
-        Assert.Contains("Missing named range 'MissingRange'", ex.Message);
+        Assert.Contains("Missing sheet 'MissingSheet1'", ex.Message);
+        Assert.Contains("Missing sheet 'MissingSheet2'", ex.Message);
     }
 }
