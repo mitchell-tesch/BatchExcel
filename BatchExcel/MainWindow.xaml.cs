@@ -3,6 +3,7 @@ using System.Windows;
 using BatchExcel.Services;
 using BatchExcel.ViewModels;
 using BatchExcel.Views;
+using Wpf.Ui.Controls;
 
 namespace BatchExcel;
 
@@ -25,7 +26,41 @@ public partial class MainWindow
                     LogTextBox.ScrollToEnd();
                 }
             };
+
+            // Forward VM notifications to the Fluent snackbar overlay.
+            vm.NotificationRequested += OnNotificationRequested;
         }
+    }
+
+    private void OnNotificationRequested(string title, string message, MainViewModel.NotificationKind kind)
+    {
+        // Marshal to UI thread — VM raises this from the awaited Task continuation, which is
+        // usually the UI thread, but guard anyway in case a future code path raises off-thread.
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => OnNotificationRequested(title, message, kind));
+            return;
+        }
+
+        var (appearance, icon, timeoutSeconds) = kind switch
+        {
+            MainViewModel.NotificationKind.Error =>
+                (ControlAppearance.Danger,  SymbolRegular.ErrorCircle24, 10),
+            MainViewModel.NotificationKind.Warning =>
+                (ControlAppearance.Caution, SymbolRegular.Warning24,     7),
+            _ =>
+                (ControlAppearance.Success, SymbolRegular.Checkmark24,   4),
+        };
+
+        var snackbar = new Snackbar(RootSnackbar)
+        {
+            Title = title,
+            Content = message,
+            Appearance = appearance,
+            Icon = new SymbolIcon(icon),
+            Timeout = TimeSpan.FromSeconds(timeoutSeconds),
+        };
+        snackbar.Show();
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
@@ -38,7 +73,7 @@ public partial class MainWindow
                 Title = "BatchExcel",
                 Content = "A batch is still running. Cancel it and close?",
                 PrimaryButtonText = "Cancel & close",
-                PrimaryButtonAppearance = Wpf.Ui.Controls.ControlAppearance.Danger,
+                PrimaryButtonAppearance = ControlAppearance.Danger,
                 CloseButtonText = "Keep running",
             };
 

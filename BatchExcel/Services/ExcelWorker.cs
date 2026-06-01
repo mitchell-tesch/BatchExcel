@@ -293,7 +293,14 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         // Save workbook copy if requested
         if (ctx.SaveRuns)
         {
-            var runFileName = FileNameSanitizer.Sanitize($"{run.Index + 1}_{run.Title}_{calculationName}");
+            // Excel caps the full path at ~218 chars. outFolder is already preflighted by
+            // BatchEngine, but a long run title can still push past the limit — clamp the file
+            // name (preserving extension) so SaveCopyAs / ExportAsFixedFormat never throw on length.
+            // ".pdf" and ".xlsx" are <= 5 chars, so reserving 5 for the extension swap is enough.
+            var pathBudget = FileNameSanitizer.ExcelMaxPathLength - ctx.OutFolder.Length - 1;
+            var runFileName = FileNameSanitizer.Sanitize(
+                $"{run.Index + 1}_{run.Title}_{calculationName}",
+                Math.Max(16, pathBudget));
             var runFilePath = Path.Combine(ctx.OutFolder, runFileName);
 
             // SaveCopyAs writes a copy without rebinding the open workbook to the new path

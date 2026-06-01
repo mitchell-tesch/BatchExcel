@@ -23,7 +23,9 @@ public static class CalculationHeaderWriter
         DateTime batchStart)
     {
 
-        using var document = SpreadsheetDocument.Open(calculationPath, isEditable: true);
+        // Retry the open to tolerate transient sharing violations on SMB shares — the staged
+        // calc file was just written by File.Copy and AV/Indexer may briefly hold it.
+        using var document = IoRetry.Run(() => SpreadsheetDocument.Open(calculationPath, isEditable: true));
         var workbookPart = document.WorkbookPart
                            ?? throw new InvalidOperationException("Workbook part not found.");
 
