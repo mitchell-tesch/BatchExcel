@@ -1,0 +1,106 @@
+﻿name: Release
+
+# Trigger on any tag matching v*  (e.g. v0.9.0-beta.1, v1.0.0).
+# Tags containing a hyphen (semver pre-release) are published as a GitHub pre-release.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Derive version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          $assembly = ($version -split '-')[0]
+          if ($assembly -notmatch '^\d+\.\d+\.\d+$') { $assembly = "$assembly.0" }
+          $assembly = "$assembly.0"
+          $isPre = $version.Contains('-')
+          "version=$version"           | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "assembly=$assembly"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "prerelease=$($isPre.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Tag=$tag Version=$version Assembly=$assembly Prerelease=$isPre"
+
+      - name: Restore
+        run: dotnet restore BatchExcel.sln
+
+      - name: Test
+        run: dotnet test BatchExcel.sln -c Release --logger "trx;LogFileName=test-results.trx"
+
+      - name: Publish (self-contained, single-file, win-x64)
+        run: >
+          dotnet publish BatchExcel/BatchExcel.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=embedded
+          -p:Version=${{ steps.ver.outputs.version }}
+          -p:AssemblyVersion=${{ steps.ver.outputs.assembly }}
+          -p:FileVersion=${{ steps.ver.outputs.assembly }}
+          -p:InformationalVersion=${{ steps.ver.outputs.version }}
+          -o publish/self-contained
+
+      - name: Publish (framework-dependent, win-x64)
+        run: >
+          dotnet publish BatchExcel/BatchExcel.csproj
+          -c Release
+          -r win-x64
+          --self-contained false
+          -p:PublishSingleFile=true
+          -p:DebugType=embedded
+          -p:Version=${{ steps.ver.outputs.version }}
+          -p:AssemblyVersion=${{ steps.ver.outputs.assembly }}
+          -p:FileVersion=${{ steps.ver.outputs.assembly }}
+          -p:InformationalVersion=${{ steps.ver.outputs.version }}
+          -o publish/framework-dependent
+
+      - name: Package zips
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $v = "${{ steps.ver.outputs.version }}"
+          Compress-Archive -Path publish/self-contained/*      -DestinationPath "artifacts/BatchExcel-$v-win-x64-self-contained.zip"     -Force
+          Compress-Archive -Path publish/framework-dependent/* -DestinationPath "artifacts/BatchExcel-$v-win-x64-framework-dependent.zip" -Force
+          Get-ChildItem artifacts | Format-Table -AutoSize
+
+      - name: Compute checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem artifacts/*.zip | ForEach-Object {
+            $h = Get-FileHash $_.FullName -Algorithm SHA256
+            "{0}  {1}" -f $h.Hash.ToLower(), $_.Name | Out-File -FilePath artifacts/SHA256SUMS.txt -Append -Encoding ascii
+          }
+          Get-Content artifacts/SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: BatchExcel ${{ steps.ver.outputs.version }}
+          draft: false
+          prerelease: ${{ steps.ver.outputs.prerelease }}
+          generate_release_notes: true
+          files: |
+            artifacts/BatchExcel-${{ steps.ver.outputs.version }}-win-x64-self-contained.zip
+            artifacts/BatchExcel-${{ steps.ver.outputs.version }}-win-x64-framework-dependent.zip
+            artifacts/SHA256SUMS.txt
+
