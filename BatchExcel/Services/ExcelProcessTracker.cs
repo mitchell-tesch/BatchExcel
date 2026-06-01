@@ -17,12 +17,20 @@ public static class ExcelProcessTracker
 
     /// <summary>
     /// Gets the OS process ID for an Excel Application COM object using its window handle.
+    /// Returns 0 if the process ID cannot be resolved.
     /// </summary>
     public static uint GetExcelProcessId(dynamic excelApp)
     {
-        IntPtr hwnd = new IntPtr((int)excelApp.Hwnd);
-        GetWindowThreadProcessId(hwnd, out uint pid);
-        return pid;
+        try
+        {
+            IntPtr hwnd = new IntPtr((int)excelApp.Hwnd);
+            GetWindowThreadProcessId(hwnd, out uint pid);
+            return pid;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     /// <summary>
@@ -105,18 +113,18 @@ public static class ExcelProcessTracker
         }
         finally
         {
-            try
-            {
-                Marshal.FinalReleaseComObject(excelApp);
-            }
-            catch
-            {
-                // Ignore
-            }
+            // We do NOT call Marshal.FinalReleaseComObject(excelApp) here.
+            // Since excelApp is passed as a 'dynamic', explicit release can cause 
+            // InvalidComObjectException if the DLR has cached the reference.
+            // We rely on the GC + Process.Kill fallback below for reliable cleanup.
 
-            // FinalReleaseComObject above has already driven the RCW refcount to zero. A single
-            // GC + finalizer wait is enough to flush any transitively-held RCWs; the previous
-            // double-collect pattern was redundant once we stopped relying on the GC alone.
+            // Because we are relying entirely on the Garbage Collector to release RCWs,
+            // we MUST use the "Double Tap" GC pattern. The first pass queues the finalizers
+            // for root objects. The second pass cleans up transitively held COM objects 
+            // (e.g., a Range held by a Sheet). Without the second pass, Excel will hang 
+            // and trigger the Process.Kill fallback every time.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
             GC.Collect();
             GC.WaitForPendingFinalizers();
 

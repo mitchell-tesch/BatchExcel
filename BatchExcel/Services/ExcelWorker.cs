@@ -39,7 +39,7 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         dynamic? excelApp = null;
         uint pid = 0;
 
-        // Caches of COM references; must be released before quitting Excel.
+        // Caches of COM references
         Dictionary<string, dynamic>? sheetCache = null;
         (dynamic sheet, dynamic range, int offset)[]? inputRangeCache = null;
         dynamic[]? outputRangeCache = null;
@@ -90,54 +90,8 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         {
             ctx.Log($"\t[Worker {ctx.WorkerId}] Shutting down...");
 
-            // Explicitly release every cached COM reference before quitting Excel.
-            // Relying on GC alone can leave RCWs alive and prevent Excel from exiting.
-            ReleaseRangeCache(inputRangeCache);
-            ReleaseRangeCache(outputRangeCache);
-            ReleaseSheetCache(sheetCache);
-            SafeRelease(workbook);
-
             if (excelApp != null)
                 ExcelProcessTracker.SafeQuitExcel(excelApp, pid);
-        }
-    }
-
-    private static void ReleaseRangeCache((dynamic sheet, dynamic range, int offset)[]? cache)
-    {
-        if (cache == null) return;
-        for (var i = 0; i < cache.Length; i++)
-        {
-            SafeRelease(cache[i].range);
-            // sheets are released via the sheet cache; nothing to release here for sheet
-        }
-    }
-
-    private static void ReleaseRangeCache(dynamic[]? cache)
-    {
-        if (cache == null) return;
-        foreach (var t in cache)
-            SafeRelease(t);
-    }
-
-    private static void ReleaseSheetCache(Dictionary<string, dynamic>? cache)
-    {
-        if (cache == null) return;
-        foreach (var s in cache.Values)
-            SafeRelease(s);
-        cache.Clear();
-    }
-
-    private static void SafeRelease(object? comObject)
-    {
-        if (comObject == null) return;
-        try
-        {
-            if (Marshal.IsComObject(comObject))
-                Marshal.FinalReleaseComObject(comObject);
-        }
-        catch
-        {
-            // ignored
         }
     }
 
