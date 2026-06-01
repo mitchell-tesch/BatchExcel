@@ -60,7 +60,11 @@ internal sealed class ExcelWorker(WorkerContext ctx)
             ctx.Log($"\t[Worker {ctx.WorkerId}] Shutting down...");
 
             if (excelApp != null)
-                ExcelProcessTracker.SafeQuitExcel(excelApp, pid);
+            {
+                var app = excelApp;
+                excelApp = null; // Clear local reference before entering SafeQuitExcel
+                ExcelProcessTracker.SafeQuitExcel(app, pid);
+            }
         }
     }
 
