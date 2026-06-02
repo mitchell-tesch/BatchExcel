@@ -19,6 +19,10 @@ internal static class PdfExporter
 
         try
         {
+            // NOTE: workbook.Application returns the same underlying COM object as the
+            // ExcelWorker's cached excelApp RCW. We must NOT FinalReleaseComObject it here
+            // — doing so detaches the worker's RCW and the next call on excelApp throws
+            // "COM object that has been separated from its underlying RCW cannot be used."
             app = workbook.Application;
 
             // Resolve sheet references, silently skipping any that don't exist
@@ -70,27 +74,22 @@ internal static class PdfExporter
                 try { sheets[0].Select(); } catch { /* ignored */ }
             }
 
-            // Release every sheet RCW we acquired so Excel can shut down cleanly and we
-            // don't accumulate references across runs.
+            // Release every sheet RCW we acquired so we don't accumulate references across runs.
+            // Use ReleaseComObject (not FinalReleaseComObject) — a PDF sheet name may alias an
+            // input/output sheet that ExcelWorker.sheetCache also holds; FinalReleaseComObject
+            // would zombify the shared RCW and break subsequent runs.
             foreach (var s in sheets)
             {
                 try
                 {
                     if (s != null && Marshal.IsComObject(s))
-                        Marshal.FinalReleaseComObject(s);
+                        Marshal.ReleaseComObject(s);
                 }
                 catch { /* ignored */ }
             }
 
-            if (app != null)
-            {
-                try
-                {
-                    if (Marshal.IsComObject(app))
-                        Marshal.FinalReleaseComObject(app);
-                }
-                catch { /* ignored */ }
-            }
+            // Intentionally DO NOT release `app` — it aliases ExcelWorker's cached excelApp RCW.
+            // The worker owns its lifetime and releases it via ExcelProcessTracker.SafeQuitExcel.
         }
     }
 }
