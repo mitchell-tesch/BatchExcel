@@ -31,7 +31,6 @@ public partial class App
 
         SystemThemeWatcher.Watch(
             Current.MainWindow,
-            Wpf.Ui.Controls.WindowBackdropType.Mica,
             updateAccents: false);
 
         // Global exception handlers to ensure zombie Excel cleanup
@@ -49,7 +48,7 @@ public partial class App
                 Content = $"An unexpected error occurred:\n\n{args.Exception.Message}",
                 CloseButtonText = "OK",
             };
-            _ = msg.ShowDialogAsync();
+            msg.ShowDialogAsync();
             args.Handled = true;
         };
     }
