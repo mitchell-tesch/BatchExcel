@@ -136,6 +136,7 @@ BatchExcel/
 │   ├── ExcelProcessTracker.cs       # PID tracking + safe quit + zombie cleanup
 │   ├── BatcherReader.cs             # Read config (ClosedXML), write results (OpenXML)
 │   ├── CalculationHeaderWriter.cs   # Write date/job/etc. headers via OpenXML defined names
+│   ├── CalculationValidator.cs      # Dry-run validation of calculation template (sheets + ranges)
 │   ├── OpenXmlHelpers.cs            # SheetWriter (indexed bulk writes) + cell helpers
 │   ├── CsvResultWriter.cs           # CSV output with injection protection
 │   ├── PdfExporter.cs               # Multi-sheet PDF export via Excel COM
@@ -156,15 +157,16 @@ BatchExcel/
 
 ```
 1. Read config         BatcherReader.ReadConfig          ClosedXML, direct file (~50 ms)
-2. Copy Calculation    one .xlsx per worker              File.Copy × N
-3. Write headers       CalculationHeaderWriter.Write     OpenXML on each copy (~20 ms)
-4. Launch workers      RunOnStaThread                    STA + IOleMessageFilter, staggered
-5. Process runs        ExcelWorker.ProcessRunQueue       Cached COM refs → Calculate() → read
+2. Validate template   CalculationValidator.Validate     OpenXML, fail-fast dry run (~10 ms)
+3. Copy Calculation    one .xlsx per worker              File.Copy × N
+4. Write headers       CalculationHeaderWriter.Write     OpenXML on each copy (~20 ms)
+5. Launch workers      RunOnStaThread                    STA + IOleMessageFilter, staggered
+6. Process runs        ExcelWorker.ProcessRunQueue       Cached COM refs → Calculate() → read
                                                          + per-run Save & PDF (optional)
-6. Release & quit      ExcelWorker finally               FinalReleaseComObject + SafeQuitExcel
-7. Write results       BatcherReader.WriteResults        Single OpenXML pass → File.Copy ×2
-8. Write CSV           CsvResultWriter.Write             StreamWriter, injection-safe escaping
-9. Cleanup             Delete worker copies              KillAllTracked on exit / on errors
+7. Release & quit      ExcelWorker finally               FinalReleaseComObject + SafeQuitExcel
+8. Write results       BatcherReader.WriteResults        Single OpenXML pass → File.Copy ×2
+9. Write CSV           CsvResultWriter.Write             StreamWriter, injection-safe escaping
+10. Cleanup            Delete worker copies              KillAllTracked on exit / on errors
 ```
 
 ### Performance design
@@ -187,12 +189,13 @@ BatchExcel/
 
 ## Testing
 
-The `BatchExcel.Tests` project (xUnit) currently includes **72 tests** covering:
+The `BatchExcel.Tests` project (xUnit) currently includes **81 tests** covering:
 
 - `BatcherReader` — round-trips against generated `.xlsx` fixtures (no Excel required)
 - `OpenXmlHelpers` / `SheetWriter` — cell reference math, indexed bulk writes, typed-value coverage (`double` / `int` / `long` / `float` / `decimal` / `bool` / `DateTime`)
 - `CsvResultWriter` — escaping, status distinction, formula-injection neutralisation, invariant-culture numbers
 - `BatchConfig` — macro parsing, included-run count
+- `CalculationValidator` — dry-run validation: sheet existence, A1 and named-range resolution, error aggregation, corrupt-file handling
 - `FileNameSanitizer` — invalid character handling
 - `UserSettings` — load / save round-trip
 - `ExcelProcessTracker` — PID tracking, kill-only-running semantics, `SafeQuitExcel` kill-fallback (via mocked `IProcessInterop`)

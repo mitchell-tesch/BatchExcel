@@ -278,6 +278,16 @@ public partial class MainViewModel : ObservableObject
             if (killedPath > 0)
                 AppendLog($"\nCleaned up {killedPath} zombie Excel process(es).");
         }
+        catch (ValidationException vex)
+        {
+            // Configuration mistake (missing sheet, bad range, corrupt template, etc.).
+            // Show a clean user-facing message — no stack trace clutter.
+            AppendLog($"\n*** Validation failed ***\n{vex.Message}");
+            ProgressText = "Validation failed";
+            FlushLog();
+            MessageBox.Show(vex.Message, "Calculation Template Validation Failed",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
         catch (Exception ex)
         {
             AppendLog($"\n*** ERROR: {ex.Message} ***");

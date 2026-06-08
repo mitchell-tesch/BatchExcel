@@ -65,6 +65,12 @@ public class BatchEngine : IDisposable
         if (!File.Exists(calculationFullPath))
             throw new FileNotFoundException($"Calculation spreadsheet not found: {calculationFullPath}");
 
+        // Step 2: Dry-run validation — fail fast before spinning up Excel workers if any
+        // input/output field references a missing sheet or unresolvable range.
+        Log("\nValidating calculation spreadsheet... ");
+        CalculationValidator.Validate(calculationFullPath, config);
+        Log("done.");
+
         // Step 3: Create output folder
         var outFolder = Path.Combine(batcherDir, $"batch_run_{timestamp}");
         Directory.CreateDirectory(outFolder);

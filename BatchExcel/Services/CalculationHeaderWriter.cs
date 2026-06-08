@@ -29,7 +29,7 @@ public static class CalculationHeaderWriter
         var workbookPart = document.WorkbookPart
                            ?? throw new InvalidOperationException("Workbook part not found.");
 
-        var definedNames = BuildDefinedNamesLookup(workbookPart);
+        var definedNames = OpenXmlHelpers.BuildDefinedNamesLookup(workbookPart);
         var sheetLookup = BuildWorksheetLookup(workbookPart);
 
         // Cache one SheetWriter per worksheet so multiple writes to the same sheet share an index.
@@ -67,33 +67,6 @@ public static class CalculationHeaderWriter
             writers[wsPart] = w;
             return w;
         }
-    }
-
-    /// <summary>
-    /// Builds a lookup of defined name → (sheet name, cell reference).
-    /// Parses references like "SheetName!$B$5" into their components.
-    /// </summary>
-    private static Dictionary<string, (string sheetName, string cellRef)> BuildDefinedNamesLookup(WorkbookPart workbookPart)
-    {
-        var definedNames = new Dictionary<string, (string sheetName, string cellRef)>(StringComparer.OrdinalIgnoreCase);
-
-        if (workbookPart.Workbook.DefinedNames == null)
-            return definedNames;
-
-        foreach (var dn in workbookPart.Workbook.DefinedNames.Elements<DefinedName>())
-        {
-            string? name = dn.Name;
-            var reference = dn.Text;
-            if (name == null) continue;
-
-            var parts = reference.Split('!');
-            if (parts.Length != 2) continue;
-            var sName = parts[0].Trim('\'');
-            var cRef = parts[1].Replace("$", "");
-            definedNames[name] = (sName, cRef);
-        }
-
-        return definedNames;
     }
 
     /// <summary>
