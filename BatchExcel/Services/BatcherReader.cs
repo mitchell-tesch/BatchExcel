@@ -42,7 +42,9 @@ public static class BatcherReader
     {
         var config = new BatchConfig();
 
-        using var workbook = new XLWorkbook(Path.GetFullPath(batcherFilePath));
+        // Retry the open to tolerate transient sharing violations on SMB shares (AV scanners,
+        // Search Indexer, OneDrive, etc.) — same failure mode as WriteResults.
+        using var workbook = IoRetry.Run(() => new XLWorkbook(Path.GetFullPath(batcherFilePath)));
         var sheet = workbook.Worksheet(BatchInSheet);
 
         // Read calculation and header inputs
@@ -154,17 +156,22 @@ public static class BatcherReader
 
         // Copy original → output folder, modify the copy once, then mirror the modified copy
         // back over the original. Avoids running the OpenXML write twice.
-        File.Copy(fullPath, copyPath, overwrite: true);
-        WriteResultsOpenXml(copyPath, config);
+        //
+        // Each step is wrapped in IoRetry to tolerate transient SMB/AV sharing violations
+        // that commonly hit a freshly-written .xlsx on a network share (antivirus scan, Search
+        // Indexer, OneDrive, etc. briefly opening the file via SMB change notifications).
+        IoRetry.Run(() => File.Copy(fullPath, copyPath, overwrite: true));
+        IoRetry.Run(() => WriteResultsOpenXml(copyPath, config));
 
         try
         {
-            File.Copy(copyPath, fullPath, overwrite: true);
+            IoRetry.Run(() => File.Copy(copyPath, fullPath, overwrite: true));
             return true;
         }
         catch (IOException)
         {
-            // Original is locked (e.g. open in Excel). The copy in the output folder is intact.
+            // Original is locked (e.g. open in Excel) or still contested after all retries.
+            // The copy in the output folder is intact.
             return false;
         }
     }

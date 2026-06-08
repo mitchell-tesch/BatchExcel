@@ -86,6 +86,23 @@ public class BatchEngine : IDisposable
         if (effectiveWorkers != requestedWorkers)
             Log($"Worker count adjusted from {requestedWorkers} to {effectiveWorkers} (bounded by CPU and run count).");
 
+        // Step 4b: Preflight path lengths. Excel's COM APIs cap full paths at ~218 chars regardless
+        // of Windows LongPathsEnabled, and PathTooLongException is not transient so it would abort
+        // the batch mid-flight with a raw stack trace. Fail fast here with an actionable message.
+        var sourceName = Path.GetFileName(calculationFullPath);
+        // outFolder + "\" + "_worker_" + <digits> + "_" + sourceName
+        var workerCopyLen = outFolder.Length + 1 + "_worker_".Length
+                            + effectiveWorkers.ToString().Length + 1 + sourceName.Length;
+        if (workerCopyLen > FileNameSanitizer.ExcelMaxPathLength)
+        {
+            var msg = $"Output paths would exceed Excel's {FileNameSanitizer.ExcelMaxPathLength}-char limit "
+                      + $"(worker copy path = {workerCopyLen}). "
+                      + $"Move the batcher closer to the drive root or shorten the calculation filename "
+                      + $"('{sourceName}', {sourceName.Length} chars).";
+            Log("ERROR: " + msg);
+            throw new PathTooLongException(msg);
+        }
+
         // Step 5: Create a single staging copy of the calculation in the output folder, write the
         // headers into it once via OpenXML, then duplicate it for each worker. Header inputs are
         // identical across workers, so writing once and copying is much cheaper than opening and
@@ -214,7 +231,9 @@ public class BatchEngine : IDisposable
         // Stage: copy source → staging file, write headers once.
         var fileName = Path.GetFileName(calculationFullPath);
         var stagedPath = Path.Combine(outFolder, $"_staged_{fileName}");
-        File.Copy(calculationFullPath, stagedPath, overwrite: true);
+        // Wrap copies in IoRetry — source and destination may both be on an SMB share where
+        // AV / Search Indexer / OneDrive briefly hold freshly-written files.
+        IoRetry.Run(() => File.Copy(calculationFullPath, stagedPath, overwrite: true));
 
         try
         {
@@ -228,7 +247,7 @@ public class BatchEngine : IDisposable
             Parallel.For(0, workerCount, new ParallelOptions { MaxDegreeOfParallelism = copyDop }, i =>
             {
                 var copy = Path.Combine(outFolder, $"_worker_{i + 1}_{fileName}");
-                File.Copy(stagedPath, copy, overwrite: true);
+                IoRetry.Run(() => File.Copy(stagedPath, copy, overwrite: true));
                 paths[i] = copy;
             });
             return paths.ToList();

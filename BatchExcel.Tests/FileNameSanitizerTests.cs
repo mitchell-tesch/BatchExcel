@@ -35,5 +35,36 @@ public class FileNameSanitizerTests
         var result = FileNameSanitizer.Sanitize(input);
         Assert.Equal(input.Length, result.Length);
     }
+
+    [Theory]
+    [InlineData("short.xlsx", 20, "short.xlsx")]
+    [InlineData("1_VeryLongRunTitle_calc.xlsx", 15, "1_VeryLong.xlsx")]
+    [InlineData("a/b\\c_calc.xlsx", 12, "a_b_c_c.xlsx")]
+    public void Sanitize_WithMaxLength_ClampsAndPreservesExtension(string input, int max, string expected)
+    {
+        var result = FileNameSanitizer.Sanitize(input, max);
+        Assert.Equal(expected, result);
+        Assert.True(result.Length <= max);
+    }
+
+    [Fact]
+    public void Sanitize_WithMaxLength_NoExtension_TruncatesStem()
+    {
+        Assert.Equal("abcde", FileNameSanitizer.Sanitize("abcdefghij", 5));
+    }
+
+    [Fact]
+    public void Sanitize_WithMaxLength_ExtensionLongerThanBudget_TruncatesWhole()
+    {
+        // ".verylongext" is 12 chars; budget 5 forces a hard right-truncate
+        Assert.Equal("a.ver", FileNameSanitizer.Sanitize("a.verylongext", 5));
+    }
+
+    [Fact]
+    public void Sanitize_WithMaxLength_NonPositive_ReturnsEmpty()
+    {
+        Assert.Equal("", FileNameSanitizer.Sanitize("anything.xlsx", 0));
+        Assert.Equal("", FileNameSanitizer.Sanitize("anything.xlsx", -3));
+    }
 }
 

@@ -62,6 +62,19 @@ public partial class MainViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(SaveLogAsCommand))]
     private string _logOutput = "";
 
+    /// <summary>True after a batch failure — drives the red status text + snackbar.</summary>
+    [ObservableProperty]
+    private bool _hasError;
+
+    /// <summary>
+    /// Severity flag for <see cref="NotificationRequested"/>. View maps these to
+    /// WPF-UI <c>ControlAppearance</c> + icon without leaking Wpf.Ui types into the VM.
+    /// </summary>
+    public enum NotificationKind { Success, Warning, Error }
+
+    /// <summary>Raised when the VM wants a transient Fluent snackbar shown.</summary>
+    public event Action<string, string, NotificationKind>? NotificationRequested;
+
     // Persist settings whenever a user-editable property changes (debounced to avoid
     // a disk write on every keystroke when bindings use UpdateSourceTrigger=PropertyChanged).
     partial void OnBatcherFilePathChanged(string value) => SchedulePersistSettings();
@@ -218,6 +231,7 @@ public partial class MainViewModel : ObservableObject
         IsRunning = true;
         ProgressPercent = 0;
         ProgressText = "Starting...";
+        HasError = false;
         lock (_logLock)
         {
             _logBuilder.Clear();
@@ -242,6 +256,27 @@ public partial class MainViewModel : ObservableObject
             await _engine.RunAsync(BatcherFilePath, WorkerCount, SaveRuns, PdfSheets);
             ProgressText = "Complete";
             ProgressPercent = 100;
+            NotificationRequested?.Invoke(
+                "Batch complete",
+                "All runs finished — see log for details.",
+                NotificationKind.Success);
+        }
+        catch (PathTooLongException ex)
+        {
+            // Preflight in BatchEngine.RunAsync throws this with an actionable message.
+            // Surface it as a Fluent snackbar (transient) + persistent log entry + red status text.
+            AppendLog($"\n*** ERROR: {ex.Message} ***");
+            ProgressText = "Failed: path too long";
+            HasError = true;
+
+            NotificationRequested?.Invoke(
+                "Output path too long for Excel",
+                ex.Message,
+                NotificationKind.Error);
+
+            var killedPath = ExcelProcessTracker.KillAllTracked();
+            if (killedPath > 0)
+                AppendLog($"\nCleaned up {killedPath} zombie Excel process(es).");
         }
         catch (ValidationException vex)
         {
@@ -258,6 +293,12 @@ public partial class MainViewModel : ObservableObject
             AppendLog($"\n*** ERROR: {ex.Message} ***");
             AppendLog(ex.StackTrace ?? "");
             ProgressText = "Failed";
+            HasError = true;
+
+            NotificationRequested?.Invoke(
+                "Batch failed",
+                ex.Message,
+                NotificationKind.Error);
 
             // Kill any remaining zombie processes
             int killed = ExcelProcessTracker.KillAllTracked();
