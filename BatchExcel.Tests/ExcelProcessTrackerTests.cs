@@ -43,9 +43,22 @@ public class ExcelProcessTrackerTests : IDisposable
     [Fact]
     public void Track_AddsToSet_IgnoringZero()
     {
+        var mock = new MockProcessInterop();
+        ExcelProcessTracker.InteropProvider = mock;
+
+        // PID 0 is ignored entirely (never tracked, never killed).
         ExcelProcessTracker.Track(0);
+
+        // A non-zero PID *is* tracked: marking it as running in the mock means
+        // KillAllTracked should pick it up and route a Kill through the provider.
+        mock.RunningPids.Add(42);
+        ExcelProcessTracker.Track(42);
+
         int killed = ExcelProcessTracker.KillAllTracked();
-        Assert.Equal(0, killed);
+
+        Assert.Equal(1, killed);
+        Assert.Contains(42, mock.KilledPids);
+        Assert.DoesNotContain(0, mock.KilledPids);
     }
 
     [Fact]

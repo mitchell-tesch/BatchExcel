@@ -187,7 +187,7 @@ BatchExcel/
 
 ## Testing
 
-The `BatchExcel.Tests` project (xUnit) currently includes **46 tests** covering:
+The `BatchExcel.Tests` project (xUnit) currently includes **72 tests** covering:
 
 - `BatcherReader` — round-trips against generated `.xlsx` fixtures (no Excel required)
 - `OpenXmlHelpers` / `SheetWriter` — cell reference math, indexed bulk writes, typed-value coverage (`double` / `int` / `long` / `float` / `decimal` / `bool` / `DateTime`)
@@ -195,6 +195,7 @@ The `BatchExcel.Tests` project (xUnit) currently includes **46 tests** covering:
 - `BatchConfig` — macro parsing, included-run count
 - `FileNameSanitizer` — invalid character handling
 - `UserSettings` — load / save round-trip
+- `ExcelProcessTracker` — PID tracking, kill-only-running semantics, `SafeQuitExcel` kill-fallback (via mocked `IProcessInterop`)
 
 ```powershell
 dotnet test
