@@ -92,7 +92,7 @@ public class BatchEngine : IDisposable
         // Step 3: Create output folder
         var outFolder = Path.Combine(batcherDir, $"batch_run_{timestamp}");
         Directory.CreateDirectory(outFolder);
-        Log($"Output folder: {outFolder}");
+        Log($"\nOutput folder: {outFolder}");
 
         // Open log file in output folder. Buffered early log messages will be flushed automatically.
         OpenLogFile(outFolder);
@@ -102,7 +102,7 @@ public class BatchEngine : IDisposable
         var effectiveWorkers = Math.Clamp(requestedWorkers, 1, Environment.ProcessorCount * 2);
         effectiveWorkers = Math.Min(effectiveWorkers, includedCount);
         if (effectiveWorkers != requestedWorkers)
-            Log($"Worker count adjusted from {requestedWorkers} to {effectiveWorkers} (bounded by CPU and run count).");
+            Log($"\nWorker count adjusted from {requestedWorkers} to {effectiveWorkers} (bounded by CPU and run count).");
 
         // Step 4b: Preflight path lengths. Excel's COM APIs cap full paths at ~218 chars regardless
         // of Windows LongPathsEnabled, and PathTooLongException is not transient so it would abort
@@ -117,7 +117,7 @@ public class BatchEngine : IDisposable
                       + $"(worker copy path = {workerCopyLen}). "
                       + $"Move the batcher closer to the drive root or shorten the calculation filename "
                       + $"('{sourceName}', {sourceName.Length} chars).";
-            Log("ERROR: " + msg);
+            Log("\nERROR: " + msg);
             throw new PathTooLongException(msg);
         }
 
@@ -149,7 +149,7 @@ public class BatchEngine : IDisposable
 
         try
         {
-            await LaunchAndAwaitWorkers(effectiveWorkers, workerCalcPaths, config, macros, runQueue, outFolder, saveRuns, pdfSheets);
+            await LaunchAndAwaitWorkers(effectiveWorkers, workerCalcPaths, sourceName, config, macros, runQueue, outFolder, saveRuns, pdfSheets);
         }
         finally
         {
@@ -219,6 +219,7 @@ public class BatchEngine : IDisposable
     private async Task LaunchAndAwaitWorkers(
         int workerCount,
         List<string> workerCalculationPaths,
+        string calculationSourceName,
         BatchConfig config,
         List<string> macros,
         ConcurrentQueue<BatchRun> runQueue,
@@ -237,6 +238,10 @@ public class BatchEngine : IDisposable
             var ctx = new WorkerContext(
                 WorkerId: workerId,
                 CalculationPath: workerCalcPath,
+                // Pass the ORIGINAL source filename (not the per-worker copy's name) so the
+                // saved run artifacts don't bleed worker-internal "_worker_N_" naming into
+                // the user-facing output.
+                CalculationSourceName: calculationSourceName,
                 Config: config,
                 Macros: macros,
                 RunQueue: runQueue,

@@ -12,6 +12,7 @@ namespace BatchExcel.Services;
 internal sealed record WorkerContext(
     int WorkerId,
     string CalculationPath,
+    string CalculationSourceName,
     BatchConfig Config,
     List<string> Macros,
     ConcurrentQueue<BatchRun> RunQueue,
@@ -74,7 +75,6 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         try
         {
             workbook = excelApp.Workbooks.Open(ctx.CalculationPath, UpdateLinks: false);
-            string calculationName = workbook.Name;
 
             SetCalculationMode(excelApp, XlCalculationManual, ctx.WorkerId, ctx.Log);
 
@@ -84,7 +84,7 @@ internal sealed class ExcelWorker(WorkerContext ctx)
 
             try
             {
-                ProcessRunQueue(excelApp, workbook, calculationName, inputRangeCache, outputRangeCache);
+                ProcessRunQueue(excelApp, workbook, inputRangeCache, outputRangeCache);
                 workbook.Close(SaveChanges: false);
             }
             catch
@@ -158,7 +158,6 @@ internal sealed class ExcelWorker(WorkerContext ctx)
     private void ProcessRunQueue(
         dynamic excelApp,
         dynamic workbook,
-        string calculationName,
         (dynamic sheet, dynamic range, int offset)[] inputRangeCache,
         dynamic[] outputRangeCache)
     {
@@ -172,7 +171,7 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         {
             try
             {
-                ProcessSingleRunWithRetry(excelApp, workbook, calculationName, run, inputRangeCache, outputRangeCache);
+                ProcessSingleRunWithRetry(excelApp, workbook, run, inputRangeCache, outputRangeCache);
             }
             catch (Exception ex)
             {
@@ -191,7 +190,6 @@ internal sealed class ExcelWorker(WorkerContext ctx)
     private void ProcessSingleRunWithRetry(
         dynamic excelApp,
         dynamic workbook,
-        string calculationName,
         BatchRun run,
         (dynamic sheet, dynamic range, int offset)[] inputRangeCache,
         dynamic[] outputRangeCache)
@@ -201,7 +199,7 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         {
             try
             {
-                ProcessSingleRun(excelApp, workbook, calculationName, run, inputRangeCache, outputRangeCache);
+                ProcessSingleRun(excelApp, workbook, run, inputRangeCache, outputRangeCache);
                 return;
             }
             catch (COMException ex) when (IsTransientComException(ex))
@@ -226,7 +224,6 @@ internal sealed class ExcelWorker(WorkerContext ctx)
     private void ProcessSingleRun(
         dynamic excelApp,
         dynamic workbook,
-        string calculationName,
         BatchRun run,
         (dynamic sheet, dynamic range, int offset)[] inputRangeCache,
         dynamic[] outputRangeCache)
@@ -241,10 +238,13 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         }
 
         // Recalculate dirty cells only.
-        // Workbook-scoped Calculate() (not Application.Calculate()) so we don't recalculate any
-        // future second open workbook in this Excel instance. With one workbook open per worker
-        // today the two are equivalent, but workbook.Calculate() is the safer default.
-        workbook.Calculate();
+        // NOTE: Workbook.Calculate doesn't exist in the Excel COM object model — only
+        // Application.Calculate (all open workbooks), Worksheet.Calculate (one sheet) and
+        // Range.Calculate (one range). Application.Calculate is safe here because each worker
+        // owns its own Excel process and only ever has its single workbook open. If that ever
+        // changes (e.g. a shared lookup workbook), switch to iterating workbook.Worksheets
+        // and calling .Calculate on each sheet instead.
+        excelApp.Calculate();
 
         // Run any configured macros
         foreach (var macroName in ctx.Macros)
@@ -268,7 +268,7 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         {
             try
             {
-                SaveRunArtifacts(workbook, run, calculationName);
+                SaveRunArtifacts(workbook, run);
             }
             catch (Exception ex)
             {
@@ -283,15 +283,21 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         ctx.Log($"\t> ({run.Index + 1}/{ctx.Config.Calculations.Count}) {run.Title}...done. [Worker {ctx.WorkerId}]");
     }
 
-    private void SaveRunArtifacts(dynamic workbook, BatchRun run, string calculationName)
+    private void SaveRunArtifacts(dynamic workbook, BatchRun run)
     {
+        // Use the ORIGINAL calculation source filename (e.g. "calculation.xlsx") rather than
+        // workbook.Name — which would be the per-worker copy's filename ("_worker_1_calculation.xlsx")
+        // and would bleed worker-internal naming into the user-facing saved artifacts.
+        //
+        // Bonus: skipping workbook.Name saves one COM round-trip per run.
+        //
         // Excel caps the full path at ~218 chars. outFolder is already preflighted by
         // BatchEngine, but a long run title can still push past the limit — clamp the file
         // name (preserving extension) so SaveCopyAs / ExportAsFixedFormat never throw on length.
         // ".pdf" and ".xlsx" are <= 5 chars, so reserving 5 for the extension swap is enough.
         var pathBudget = FileNameSanitizer.ExcelMaxPathLength - ctx.OutFolder.Length - 1;
         var runFileName = FileNameSanitizer.Sanitize(
-            $"{run.Index + 1}_{run.Title}_{calculationName}",
+            $"{run.Index + 1}_{run.Title}_{ctx.CalculationSourceName}",
             Math.Max(16, pathBudget));
         var runFilePath = Path.Combine(ctx.OutFolder, runFileName);
 

@@ -9,7 +9,7 @@
         <ApplicationIcon>Resources\app_icon.ico</ApplicationIcon>
         <!-- Informational SemVer (shown in About / file metadata). Override at pack/publish
              time with `-p:Version=...` from CI so the tag drives the version. -->
-        <Version>0.9.1</Version>
+        <Version>1.0.0</Version>
         <AssemblyVersion>0.9.1.0</AssemblyVersion>
         <FileVersion>0.9.1.0</FileVersion>
         <InformationalVersion>0.9.1</InformationalVersion>

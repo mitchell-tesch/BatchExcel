@@ -65,8 +65,8 @@ batch_run_260529-173057/
 ├── batch_log.log                                 # Full unbounded log
 ├── raw_output_fields.csv                         # All results, one row per run
 ├── <batcher>.xlsx                                # Copy of batcher with results written back
-└── <N>_<title>__worker_<W>_<calculation>.xlsx    # Per-run saved copies (if Save Runs enabled)
-    <N>_<title>__worker_<W>_<calculation>.pdf     # Per-run PDFs (if PDF Sheets specified)
+└── <N>_<title>_<calculation>.xlsx                # Per-run saved copies (if Save Runs enabled)
+    <N>_<title>_<calculation>.pdf                 # Per-run PDFs (if PDF Sheets specified)
 ```
 
 If the original batcher workbook is open in Excel when results are written back, BatchExcel logs a warning and leaves the copy in the output folder as the canonical result.
