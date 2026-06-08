@@ -19,6 +19,10 @@ internal static class PdfExporter
 
         try
         {
+            // NOTE: workbook.Application returns the same underlying COM object as the
+            // ExcelWorker's cached excelApp RCW. We must NOT FinalReleaseComObject it here
+            // — doing so detaches the worker's RCW and the next call on excelApp throws
+            // "COM object that has been separated from its underlying RCW cannot be used."
             app = workbook.Application;
 
             // Resolve sheet references, silently skipping any that don't exist

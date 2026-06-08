@@ -205,5 +205,13 @@
                 </ui:Card>
             </Grid>
         </Grid>
+        <!-- Fluent transient notifications. Overlays the whole window, anchored top-centre. -->
+        <ui:SnackbarPresenter x:Name="RootSnackbar"
+                              Grid.Row="0"
+                              Grid.RowSpan="3"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Top"
+                              Margin="0,24,0,0"
+                              MaxWidth="520" />
     </Grid>
 </ui:FluentWindow>
