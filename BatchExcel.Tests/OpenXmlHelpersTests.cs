@@ -29,5 +29,30 @@ public class OpenXmlHelpersTests
     {
         Assert.Equal(expected, OpenXmlHelpers.ParseRowIndex(cellRef));
     }
+
+    [Theory]
+    [InlineData("A1", 1)]
+    [InlineData("B5", 2)]
+    [InlineData("Z1", 26)]
+    [InlineData("AA1", 27)]
+    [InlineData("AB1", 28)]
+    [InlineData("AZ1", 52)]
+    [InlineData("BA1", 53)]
+    [InlineData("ZZ100", 702)]
+    [InlineData("XFD1048576", 16384)] // Excel max column
+    [InlineData("$B$5", 2)] // absolute refs: bails out at '$' which is fine for our use
+    public void ParseColumnIndex_ExtractsColumnNumber(string cellRef, int expected)
+    {
+        Assert.Equal(expected, OpenXmlHelpers.ParseColumnIndex(cellRef));
+    }
+
+    [Fact]
+    public void ParseColumnIndex_OrdersCellsByExcelColumnNotLexicographically()
+    {
+        // Critical: Excel orders "B" (col 2) before "AA" (col 27) but lexicographic ordering
+        // puts "AA" first. SheetWriter relies on ParseColumnIndex to get this right.
+        Assert.True(OpenXmlHelpers.ParseColumnIndex("B1") < OpenXmlHelpers.ParseColumnIndex("AA1"));
+        Assert.True(string.Compare("AA1", "B1", System.StringComparison.Ordinal) < 0); // lexicographic disagrees
+    }
 }
 

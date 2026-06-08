@@ -42,7 +42,9 @@ public class UserSettings
     }
 
     /// <summary>
-    /// Persists current settings to disk.
+    /// Persists current settings to disk atomically: writes to a tempfile in the same
+    /// directory, then moves over the target. Prevents a crash mid-write from leaving
+    /// the settings file empty/corrupt (which would silently reset to defaults next launch).
     /// </summary>
     public void Save()
     {
@@ -50,7 +52,11 @@ public class UserSettings
         {
             Directory.CreateDirectory(SettingsDir);
             string json = JsonSerializer.Serialize(this, JsonOptions);
-            File.WriteAllText(SettingsFile, json);
+
+            // Same-directory tempfile so File.Move is an atomic rename on NTFS rather than a copy.
+            var tempPath = SettingsFile + ".tmp";
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, SettingsFile, overwrite: true);
         }
         catch
         {

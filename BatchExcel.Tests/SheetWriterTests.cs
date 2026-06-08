@@ -54,6 +54,24 @@ public class SheetWriterTests
     }
 
     [Fact]
+    public void SetCellValue_MultiLetterColumns_SortedByExcelOrderNotLexicographic()
+    {
+        // Excel orders columns by index: B (2) < AA (27) < AB (28). Lexicographic order would
+        // put AA / AB before B. Catches regressions in SheetWriter's column-index comparator.
+        var sheet = new SheetData();
+        var writer = new SheetWriter(sheet);
+
+        writer.SetCellValue(1, 28, "AB1");
+        writer.SetCellValue(1, 27, "AA1");
+        writer.SetCellValue(1, 2, "B1");
+        writer.SetCellValue(1, 1, "A1");
+
+        var refs = sheet.Elements<Row>().Single().Elements<Cell>()
+            .Select(c => c.CellReference?.Value).ToArray();
+        Assert.Equal(new[] { "A1", "B1", "AA1", "AB1" }, refs);
+    }
+
+    [Fact]
     public void SetCellValue_UpdatesExistingCell()
     {
         var sheet = new SheetData();

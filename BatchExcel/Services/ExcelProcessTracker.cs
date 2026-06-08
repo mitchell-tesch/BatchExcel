@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace BatchExcel.Services;
@@ -158,14 +158,16 @@ public static class ExcelProcessTracker
         }
         finally
         {
-            // Ensure the local dynamic reference is cleared from the stack before collecting,
-            // otherwise the GC might still see it as a root.
-            excelApp = null;
-
+            // NOTE: assigning the parameter to null here would do nothing for unrooting —
+            // it's the *caller's* local that pins the RCW. The caller (ExcelWorker.Run)
+            // is responsible for releasing its 'excelApp' local before invoking us; this
+            // method only sees a copy of the reference on its own stack frame, which will
+            // go out of scope when the method returns and the GC.Collect calls below run.
+            //
             // Because we are relying entirely on the Garbage Collector to release RCWs,
             // we MUST use the "Double Tap" GC pattern. The first pass queues the finalizers
-            // for root objects. The second pass cleans up transitively held COM objects 
-            // (e.g., a Range held by a Sheet). Without the second pass, Excel will hang 
+            // for root objects. The second pass cleans up transitively held COM objects
+            // (e.g., a Range held by a Sheet). Without the second pass, Excel will hang
             // and trigger the Process.Kill fallback every time.
             GC.Collect();
             GC.WaitForPendingFinalizers();

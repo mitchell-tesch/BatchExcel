@@ -115,5 +115,55 @@ public class CsvResultWriterTests : IDisposable
         Assert.Contains(",1234.56,", csv);
         Assert.Contains(",0.5", csv);
     }
+
+    [Theory]
+    [InlineData(-5.5)]
+    [InlineData(-0.001)]
+    [InlineData(-100.0)]
+    public void Write_NegativeNumbers_AreNotEscapedAsFormulas(double v)
+    {
+        // Critical: engineering calculations routinely produce negative outputs. Wrapping a
+        // legitimate "-5.5" in a single-quote prefix would convert it to the text string
+        // "'-5.5" in Excel, corrupting downstream numeric analysis. The formula-injection
+        // neutraliser must skip cells that parse as InvariantCulture numbers.
+        var cfg = MakeConfig(
+            new BatchRun
+            {
+                Index = 0, Include = true, Title = "Neg",
+                Results = new object?[] { v, 0.0 }
+            });
+
+        CsvResultWriter.Write(_tempDir, cfg);
+        string csv = ReadCsv();
+
+        var rendered = v.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Contains("," + rendered + ",", csv);
+        Assert.DoesNotContain(",'" + rendered, csv);
+    }
+
+    [Theory]
+    [InlineData("-CMD|/c calc")]   // negative-looking, but not a number → must be neutralised
+    [InlineData("-not_a_number")]
+    [InlineData("+abc")]
+    [InlineData("=1+1")]
+    [InlineData("@inject")]
+    public void Write_NonNumericValuesStartingWithFormulaChars_AreStillNeutralised(string injection)
+    {
+        // Ensures the negative-number carve-out from EscapeCsv doesn't open a security hole:
+        // values that LOOK like they start with - or + but aren't valid numbers must still be
+        // prefixed.
+        var cfg = MakeConfig(
+            new BatchRun
+            {
+                Index = 0, Include = true, Title = "Inj",
+                Results = new object?[] { injection, "safe" }
+            });
+
+        CsvResultWriter.Write(_tempDir, cfg);
+        string csv = ReadCsv();
+
+        Assert.True(csv.Contains(",'" + injection) || csv.Contains(",\"'" + injection),
+            $"Expected '{injection}' to be neutralised; got: {csv}");
+    }
 }
 

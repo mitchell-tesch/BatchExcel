@@ -72,7 +72,7 @@ public class ComMessageFilter : IOleMessageFilter
 
     [DllImport("ole32.dll")]
     private static extern int CoRegisterMessageFilter(
-        [MarshalAs(UnmanagedType.Interface)] IOleMessageFilter lpMessageFilter,
+        [MarshalAs(UnmanagedType.Interface)] IOleMessageFilter? lpMessageFilter,
         [MarshalAs(UnmanagedType.Interface)] out IOleMessageFilter? lplpMessageFilter);
 
     private class FilterRegistration : IDisposable
@@ -89,7 +89,9 @@ public class ComMessageFilter : IOleMessageFilter
         {
             if (!_disposed)
             {
-                CoRegisterMessageFilter(_oldFilter!, out _);
+                // Restore the previous filter (may legitimately be null on first registration —
+                // the interop signature is nullable so we don't need the bang operator).
+                CoRegisterMessageFilter(_oldFilter, out _);
                 _disposed = true;
             }
         }

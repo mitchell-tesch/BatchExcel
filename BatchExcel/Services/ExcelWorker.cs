@@ -162,14 +162,14 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         (dynamic sheet, dynamic range, int offset)[] inputRangeCache,
         dynamic[] outputRangeCache)
     {
-        while (ctx.RunQueue.TryDequeue(out var run))
+        // Check cancellation BEFORE dequeuing so a cancelled run isn't half-claimed:
+        // the previous "dequeue then check" pattern would leave a dequeued run with
+        // Results = null, which CsvResultWriter renders as "Failed" — misleading because
+        // the run was never actually attempted. Leaving it in the queue keeps the run
+        // available for another worker (if any) or, post-batch, it surfaces only via the
+        // cancellation log line rather than as a spurious failure.
+        while (!ctx.CancellationToken.IsCancellationRequested && ctx.RunQueue.TryDequeue(out var run))
         {
-            if (ctx.CancellationToken.IsCancellationRequested)
-            {
-                ctx.Log($"\t[Worker {ctx.WorkerId}] Cancelled.");
-                break;
-            }
-
             try
             {
                 ProcessSingleRunWithRetry(excelApp, workbook, calculationName, run, inputRangeCache, outputRangeCache);
@@ -183,6 +183,9 @@ internal sealed class ExcelWorker(WorkerContext ctx)
 
             ctx.ReportRunCompleted();
         }
+
+        if (ctx.CancellationToken.IsCancellationRequested)
+            ctx.Log($"\t[Worker {ctx.WorkerId}] Cancelled.");
     }
 
     private void ProcessSingleRunWithRetry(
@@ -201,12 +204,17 @@ internal sealed class ExcelWorker(WorkerContext ctx)
                 ProcessSingleRun(excelApp, workbook, calculationName, run, inputRangeCache, outputRangeCache);
                 return;
             }
-            catch (COMException ex) when (attempt < maxAttempts && IsTransientComException(ex))
+            catch (COMException ex) when (IsTransientComException(ex))
             {
+                // On the final attempt, propagate so ProcessRunQueue marks the run as Failed.
+                // Without this explicit throw, exiting the loop normally would let the caller
+                // believe the run succeeded (with stale/empty Results) — a silent-failure footgun.
+                if (attempt == maxAttempts) throw;
+
                 ctx.Log($"\t[Worker {ctx.WorkerId}] COM busy on '{run.Title}', retry {attempt}/{maxAttempts - 1}...");
                 Thread.Sleep(1000 * attempt);
             }
-            // Non-transient or final-attempt failures propagate to ProcessRunQueue's catch.
+            // Non-transient COMExceptions and any other exception propagate immediately.
         }
     }
 
@@ -223,8 +231,6 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         (dynamic sheet, dynamic range, int offset)[] inputRangeCache,
         dynamic[] outputRangeCache)
     {
-        var totalRuns = ctx.Config.Calculations.Count;
-
         // Populate input fields using cached range references
         for (var i = 0; i < inputRangeCache.Length; i++)
         {
@@ -234,8 +240,11 @@ internal sealed class ExcelWorker(WorkerContext ctx)
             inputRangeCache[i].range.Value = inputValue;
         }
 
-        // Recalculate dirty cells only
-        excelApp.Calculate();
+        // Recalculate dirty cells only.
+        // Workbook-scoped Calculate() (not Application.Calculate()) so we don't recalculate any
+        // future second open workbook in this Excel instance. With one workbook open per worker
+        // today the two are equivalent, but workbook.Calculate() is the safer default.
+        workbook.Calculate();
 
         // Run any configured macros
         foreach (var macroName in ctx.Macros)
@@ -249,32 +258,51 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         {
             results[f] = outputRangeCache[f].Value;
         }
+        // Assign Results BEFORE the optional save+PDF block. If SaveCopyAs / ExportAsFixedFormat
+        // throws (disk full, locked, malformed PDF sheet name) we still want the calculated
+        // values written to CSV — the save artifact is a convenience, not the canonical result.
         run.Results = results;
 
         // Save workbook copy if requested
         if (ctx.SaveRuns)
         {
-            // Excel caps the full path at ~218 chars. outFolder is already preflighted by
-            // BatchEngine, but a long run title can still push past the limit — clamp the file
-            // name (preserving extension) so SaveCopyAs / ExportAsFixedFormat never throw on length.
-            // ".pdf" and ".xlsx" are <= 5 chars, so reserving 5 for the extension swap is enough.
-            var pathBudget = FileNameSanitizer.ExcelMaxPathLength - ctx.OutFolder.Length - 1;
-            var runFileName = FileNameSanitizer.Sanitize(
-                $"{run.Index + 1}_{run.Title}_{calculationName}",
-                Math.Max(16, pathBudget));
-            var runFilePath = Path.Combine(ctx.OutFolder, runFileName);
-
-            // SaveCopyAs writes a copy without rebinding the open workbook to the new path
-            workbook.SaveCopyAs(runFilePath);
-
-            if (ctx.PdfSheets.Count > 0)
+            try
             {
-                var pdfPath = Path.ChangeExtension(runFilePath, ".pdf");
-                PdfExporter.Export(workbook, ctx.PdfSheets, pdfPath);
+                SaveRunArtifacts(workbook, run, calculationName);
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail the run — Results is already populated, so CSV will show
+                // "Completed" with valid values. Missing-PDF / missing-xlsx is a recoverable
+                // problem that the user can re-export later from raw_output_fields.csv.
+                ctx.Log($"\t[Worker {ctx.WorkerId}] WARNING: save artifacts for '{run.Title}' failed: {ex.Message}. " +
+                        "Calculation results were retained.");
             }
         }
 
-        ctx.Log($"\t> ({run.Index + 1}/{totalRuns}) {run.Title}...done. [Worker {ctx.WorkerId}]");
+        ctx.Log($"\t> ({run.Index + 1}/{ctx.Config.Calculations.Count}) {run.Title}...done. [Worker {ctx.WorkerId}]");
+    }
+
+    private void SaveRunArtifacts(dynamic workbook, BatchRun run, string calculationName)
+    {
+        // Excel caps the full path at ~218 chars. outFolder is already preflighted by
+        // BatchEngine, but a long run title can still push past the limit — clamp the file
+        // name (preserving extension) so SaveCopyAs / ExportAsFixedFormat never throw on length.
+        // ".pdf" and ".xlsx" are <= 5 chars, so reserving 5 for the extension swap is enough.
+        var pathBudget = FileNameSanitizer.ExcelMaxPathLength - ctx.OutFolder.Length - 1;
+        var runFileName = FileNameSanitizer.Sanitize(
+            $"{run.Index + 1}_{run.Title}_{calculationName}",
+            Math.Max(16, pathBudget));
+        var runFilePath = Path.Combine(ctx.OutFolder, runFileName);
+
+        // SaveCopyAs writes a copy without rebinding the open workbook to the new path
+        workbook.SaveCopyAs(runFilePath);
+
+        if (ctx.PdfSheets.Count > 0)
+        {
+            var pdfPath = Path.ChangeExtension(runFilePath, ".pdf");
+            PdfExporter.Export(workbook, ctx.PdfSheets, pdfPath, ctx.Log);
+        }
     }
 
     /// <summary>

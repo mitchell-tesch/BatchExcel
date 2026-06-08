@@ -1,5 +1,6 @@
 ﻿namespace BatchExcel.Services;
 
+using System.IO;
 using System.Runtime.InteropServices;
 
 /// <summary>
@@ -10,8 +11,10 @@ internal static class PdfExporter
 {
     /// <summary>
     /// Exports the specified sheets of the workbook to a single PDF file.
+    /// PDF export failures do not abort the surrounding batch run — they are reported via
+    /// <paramref name="log"/> so the user has a record of which exports failed and why.
     /// </summary>
-    public static void Export(dynamic workbook, List<string> sheetNames, string pdfPath)
+    public static void Export(dynamic workbook, List<string> sheetNames, string pdfPath, Action<string>? log = null)
     {
         var sheets = new List<dynamic>();
         dynamic? app = null;
@@ -25,13 +28,22 @@ internal static class PdfExporter
             // "COM object that has been separated from its underlying RCW cannot be used."
             app = workbook.Application;
 
-            // Resolve sheet references, silently skipping any that don't exist
+            // Resolve sheet references, recording any names that couldn't be found so the user
+            // can spot a typo in the PDF Sheets setting.
+            var missing = new List<string>();
             foreach (var name in sheetNames)
             {
-                try { sheets.Add(workbook.Sheets[name]); } catch { /* skip missing */ }
+                try { sheets.Add(workbook.Sheets[name]); }
+                catch { missing.Add(name); }
             }
+            if (missing.Count > 0)
+                log?.Invoke($"\tPDF: skipped missing sheet(s): {string.Join(", ", missing)}");
 
-            if (sheets.Count == 0) return;
+            if (sheets.Count == 0)
+            {
+                log?.Invoke($"\tPDF: no matching sheets found for '{Path.GetFileName(pdfPath)}', export skipped.");
+                return;
+            }
 
             // Select all target sheets. Activate the first so ExportAsFixedFormat targets it,
             // then additively select the rest.
@@ -45,7 +57,7 @@ internal static class PdfExporter
             try { app.PrintCommunication = false; printCommToggled = true; }
             catch
             {
-                // ignored
+                // ignored — older Excel versions / non-standard configurations may not expose it
             }
 
             workbook.ActiveSheet.ExportAsFixedFormat(
@@ -55,9 +67,11 @@ internal static class PdfExporter
                 IncludeDocProperties: false,
                 IgnorePrintAreas: false);
         }
-        catch
+        catch (Exception ex)
         {
-            // PDF export failure should not stop the batch
+            // PDF export failure should not stop the batch, but it must not be silent either —
+            // a missing PDF with no log entry would be very confusing for the user.
+            log?.Invoke($"\tPDF export failed for '{Path.GetFileName(pdfPath)}': {ex.Message}");
         }
         finally
         {

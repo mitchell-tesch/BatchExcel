@@ -253,13 +253,31 @@ public partial class MainViewModel : ObservableObject
 
         try
         {
-            await _engine.RunAsync(BatcherFilePath, WorkerCount, SaveRuns, PdfSheets);
-            ProgressText = "Complete";
-            ProgressPercent = 100;
-            NotificationRequested?.Invoke(
-                "Batch complete",
-                "All runs finished — see log for details.",
-                NotificationKind.Success);
+            // RunAsync's first await is deep inside the worker loop — the prep work (config
+            // read, validation, file copies, header writes) runs synchronously up to that point.
+            // Offload to a thread-pool thread so the UI stays responsive during prep on large
+            // batchers / slow disks. Log + Progress callbacks already marshal back to the UI
+            // thread (via thread-safe buffer + dispatcher BeginInvoke).
+            await Task.Run(() => _engine.RunAsync(BatcherFilePath, WorkerCount, SaveRuns, PdfSheets));
+
+            if (_engine.WasCancelled)
+            {
+                ProgressText = $"Cancelled ({_engine.CompletedRunCount}/{_engine.TotalIncludedRunCount} done)";
+                NotificationRequested?.Invoke(
+                    "Batch cancelled",
+                    $"{_engine.CompletedRunCount} of {_engine.TotalIncludedRunCount} runs completed before cancel. " +
+                    "Partial results were written to the output folder.",
+                    NotificationKind.Warning);
+            }
+            else
+            {
+                ProgressText = "Complete";
+                ProgressPercent = 100;
+                NotificationRequested?.Invoke(
+                    "Batch complete",
+                    "All runs finished — see log for details.",
+                    NotificationKind.Success);
+            }
         }
         catch (PathTooLongException ex)
         {
@@ -323,8 +341,9 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanCancelBatch))]
     private void CancelBatch()
     {
+        // BatchEngine.Cancel already emits "Cancellation requested..." via its own log channel
+        // — don't double-log it here.
         _engine?.Cancel();
-        AppendLog("\nCancellation requested...");
     }
 
     private bool CanCancelBatch() => IsRunning;
@@ -361,8 +380,22 @@ public partial class MainViewModel : ObservableObject
                 // Trim on a line boundary near trimAt
                 while (trimAt < _logBuilder.Length && _logBuilder[trimAt] != '\n') trimAt++;
                 if (trimAt < _logBuilder.Length) trimAt++;
-                _logBuilder.Remove(0, trimAt);
-                _logBuilder.Insert(0, LogTruncationNotice);
+                if (trimAt < _logBuilder.Length)
+                {
+                    // StringBuilder.Insert(0, ...) shifts the whole buffer (O(n)). Capturing the
+                    // tail, clearing, then appending notice+tail does the same number of byte
+                    // moves but in one direction — friendlier to the StringBuilder chunk layout.
+                    var keep = _logBuilder.ToString(trimAt, _logBuilder.Length - trimAt);
+                    _logBuilder.Clear();
+                    _logBuilder.Append(LogTruncationNotice);
+                    _logBuilder.Append(keep);
+                }
+                else
+                {
+                    // The buffer was a single very long line — keep nothing but the notice.
+                    _logBuilder.Clear();
+                    _logBuilder.Append(LogTruncationNotice);
+                }
             }
 
             _logDirty = true;

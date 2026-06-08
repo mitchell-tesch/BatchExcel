@@ -29,9 +29,16 @@ public partial class App
         // refresh the Application accent resource dictionary.
         ApplicationThemeManager.Changed += (_, _) => ApplyBrandAccent();
 
-        SystemThemeWatcher.Watch(
-            Current.MainWindow,
-            updateAccents: false);
+        // SystemThemeWatcher.Watch needs the MainWindow's HWND, but Current.MainWindow is
+        // still null here because StartupUri navigation happens AFTER OnStartup returns.
+        // Defer the watch hook-up until the main window actually exists.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (Current.MainWindow != null)
+            {
+                SystemThemeWatcher.Watch(Current.MainWindow, updateAccents: false);
+            }
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
 
         // Global exception handlers to ensure zombie Excel cleanup
         AppDomain.CurrentDomain.UnhandledException += (_, _) =>

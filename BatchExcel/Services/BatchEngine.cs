@@ -22,6 +22,19 @@ public class BatchEngine : IDisposable
     private long _lastProgressUpdateTicks;
     private readonly CancellationTokenSource _cts = new();
 
+    /// <summary>
+    /// True if the batch was cancelled mid-run. Set when <see cref="Cancel"/> is invoked.
+    /// The VM uses this to distinguish a clean completion from a user-cancelled partial run.
+    /// </summary>
+    public bool WasCancelled => _wasCancelled;
+    private volatile bool _wasCancelled;
+
+    /// <summary>Number of runs that actually completed (success or failure) before the engine returned.</summary>
+    public int CompletedRunCount => _completedRuns;
+
+    /// <summary>Total number of runs originally scheduled (included in the batch).</summary>
+    public int TotalIncludedRunCount => _totalIncludedRuns;
+
     // Log-to-file state. Messages emitted before the output folder exists are buffered;
     // once OpenLogFile() is called, the buffer is flushed and subsequent messages stream directly.
     private readonly StringBuilder _earlyLogBuffer = new();
@@ -46,13 +59,18 @@ public class BatchEngine : IDisposable
         Log("\nReading batching input...");
         var config = BatcherReader.ReadConfig(batcherFilePath);
 
+        // IncludedCalcCount enumerates Calculations on each access — cache once for the
+        // multiple comparisons / log lines below to avoid O(N) scans on large run counts.
+        var includedCount = config.IncludedCalcCount;
+        var totalCount = config.Calculations.Count;
+
         Log($"\t> Calculation file: {config.CalculationFile}");
         Log($"\t> No. of input fields: {config.InputFields.Count}");
         Log($"\t> No. of output fields: {config.OutputFields.Count}");
         Log($"\t> No. of skipped fields: {config.SkipFields.Count}");
-        Log($"\t> No. of calculations: {config.Calculations.Count} ({config.IncludedCalcCount} included and {config.Calculations.Count - config.IncludedCalcCount} skipped)");
+        Log($"\t> No. of calculations: {totalCount} ({includedCount} included and {totalCount - includedCount} skipped)");
 
-        if (config.IncludedCalcCount == 0)
+        if (includedCount == 0)
         {
             Log("\nNo calculations to process.");
             return;
@@ -82,7 +100,7 @@ public class BatchEngine : IDisposable
         // Step 4: Clamp worker count.
         var requestedWorkers = workerCount;
         var effectiveWorkers = Math.Clamp(requestedWorkers, 1, Environment.ProcessorCount * 2);
-        effectiveWorkers = Math.Min(effectiveWorkers, config.IncludedCalcCount);
+        effectiveWorkers = Math.Min(effectiveWorkers, includedCount);
         if (effectiveWorkers != requestedWorkers)
             Log($"Worker count adjusted from {requestedWorkers} to {effectiveWorkers} (bounded by CPU and run count).");
 
@@ -116,7 +134,7 @@ public class BatchEngine : IDisposable
         Log($"\nStarting batching with {effectiveWorkers} parallel worker(s)...");
 
         _completedRuns = 0;
-        _totalIncludedRuns = config.IncludedCalcCount;
+        _totalIncludedRuns = includedCount;
         _lastProgressUpdateTicks = 0;
         ProgressChanged?.Invoke(0, _totalIncludedRuns);
 
@@ -126,7 +144,7 @@ public class BatchEngine : IDisposable
         // Log skipped runs
         foreach (var run in config.Calculations.Where(r => !r.Include))
         {
-            Log($"\t> ({run.Index + 1}/{config.Calculations.Count}) {run.Title} - skipped.");
+            Log($"\t> ({run.Index + 1}/{totalCount}) {run.Title} - skipped.");
         }
 
         try
@@ -140,7 +158,22 @@ public class BatchEngine : IDisposable
             CleanupWorkerCalculationCopies(workerCalcPaths);
         }
 
-        // Step 7: Write results back (direct file access — no Excel needed)
+        // If every worker failed to start (e.g. workbook.Open threw for all of them) the queue
+        // will still contain undequeued runs. Without this check the engine would happily claim
+        // "Batch completed successfully" while producing zero results.
+        // Skip the check when the user cancelled — undequeued items in that case are expected,
+        // not a failure mode, and shouldn't be reported as "every worker failed to start".
+        if (!_wasCancelled && !runQueue.IsEmpty)
+        {
+            var undone = runQueue.Count;
+            throw new InvalidOperationException(
+                $"Batch aborted: {undone} run(s) were never processed because every worker failed to start. " +
+                "See the log above for the per-worker failure reason.");
+        }
+
+        // Step 7: Write results back (direct file access — no Excel needed).
+        // Always write whatever results we have, even on cancellation — partial results are
+        // more useful to the user than no results.
         Log("\nWriting results... ");
         bool originalUpdated = BatcherReader.WriteResults(batcherFilePath, config, outFolder);
         if (!originalUpdated)
@@ -152,14 +185,28 @@ public class BatchEngine : IDisposable
         Log("done.");
 
         var elapsed = DateTime.Now - batchStart;
-        Log($"\nBatch completed successfully in {elapsed.TotalSeconds:F1} seconds.");
+        if (_wasCancelled)
+            Log($"\nBatch cancelled after {elapsed.TotalSeconds:F1} seconds ({_completedRuns}/{_totalIncludedRuns} runs completed before cancel).");
+        else
+            Log($"\nBatch completed successfully in {elapsed.TotalSeconds:F1} seconds.");
     }
 
-    /// <summary>Cancels the running batch operation.</summary>
+    /// <summary>Cancels the running batch operation. Safe to call after Dispose.</summary>
     public void Cancel()
     {
         Log("\nCancellation requested...");
-        _cts.Cancel();
+        _wasCancelled = true;
+        try
+        {
+            // _cts.Cancel() throws ObjectDisposedException if Dispose() has already run —
+            // possible if the UI thread races a Cancel click against the batch's finally block.
+            if (!_cts.IsCancellationRequested)
+                _cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Batch already finished or torn down — nothing to cancel.
+        }
     }
 
     public void Dispose()
@@ -254,7 +301,11 @@ public class BatchEngine : IDisposable
         }
         finally
         {
-            try { File.Delete(stagedPath); } catch { /* best effort */ }
+            // Wrap delete in IoRetry — on SMB shares or AV-active workstations the staged
+            // file's handle may still be held briefly after CalculationHeaderWriter.Write
+            // returns. A failed delete here would leak a "_staged_*.xlsx" file into the
+            // output folder, which is cosmetic but confusing.
+            try { IoRetry.Run(() => File.Delete(stagedPath)); } catch { /* best effort */ }
         }
     }
 
@@ -262,7 +313,8 @@ public class BatchEngine : IDisposable
     {
         foreach (var p in paths)
         {
-            try { File.Delete(p); } catch { /* best effort */ }
+            // Same SMB/AV rationale as the staged file delete above.
+            try { IoRetry.Run(() => File.Delete(p)); } catch { /* best effort */ }
         }
     }
 

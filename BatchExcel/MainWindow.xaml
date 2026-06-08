@@ -178,7 +178,19 @@
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"
                                FontSize="15"
-                               FontWeight="SemiBold" />
+                               FontWeight="SemiBold">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <!-- Turn the status text red on failure so the user has an
+                                         in-place visual cue even after the snackbar dismisses. -->
+                                    <DataTrigger Binding="{Binding HasError}" Value="True">
+                                        <Setter Property="Foreground" Value="#C42B1C" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
                 </Grid>
             </Grid>
             <Grid Grid.Row="4">

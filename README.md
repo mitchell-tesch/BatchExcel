@@ -189,16 +189,18 @@ BatchExcel/
 
 ## Testing
 
-The `BatchExcel.Tests` project (xUnit) currently includes **81 tests** covering:
+The `BatchExcel.Tests` project (xUnit) currently includes **125 tests** covering:
 
 - `BatcherReader` — round-trips against generated `.xlsx` fixtures (no Excel required)
-- `OpenXmlHelpers` / `SheetWriter` — cell reference math, indexed bulk writes, typed-value coverage (`double` / `int` / `long` / `float` / `decimal` / `bool` / `DateTime`)
-- `CsvResultWriter` — escaping, status distinction, formula-injection neutralisation, invariant-culture numbers
+- `OpenXmlHelpers` / `SheetWriter` — cell reference math, indexed bulk writes, Excel column-order sorting (B before AA, not lexicographic), append-fast-path correctness, typed-value coverage (`double` / `int` / `long` / `float` / `decimal` / `bool` / `DateTime`)
+- `CsvResultWriter` — escaping, status distinction, formula-injection neutralisation, negative-number numeric-preservation (no formula-prefix on legitimate negatives), invariant-culture numbers
 - `BatchConfig` — macro parsing, included-run count
 - `CalculationValidator` — dry-run validation: sheet existence, A1 and named-range resolution, error aggregation, corrupt-file handling
 - `FileNameSanitizer` — invalid character handling
 - `UserSettings` — load / save round-trip
 - `ExcelProcessTracker` — PID tracking, kill-only-running semantics, `SafeQuitExcel` kill-fallback (via mocked `IProcessInterop`)
+- `IoRetry` — transient vs non-transient `IOException` classification, retry exhaustion, non-IO exception pass-through
+- `BatchEngine` — Cancel/WasCancelled semantics, Cancel-after-Dispose safety, idempotent Dispose, failure-path cleanup
 
 ```powershell
 dotnet test
