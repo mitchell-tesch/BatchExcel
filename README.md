@@ -173,7 +173,7 @@ BatchExcel/
 |------------------------------------------------------------------------------|--------|
 | Per-worker calculation file copy                                             | Eliminates file locking contention between Excel instances |
 | Cached sheet + range COM references                                          | Eliminates repeated COM lookups per run |
-| Explicit `Marshal.FinalReleaseComObject` on cached refs                      | Reliable Excel shutdown without leaking RCWs |
+| Scope-isolated GC double-tap pattern                                         | Reliable Excel shutdown without leaking RCWs |
 | Manual calc mode + `Calculate()` per run                                     | Only recalculates dirty cells |
 | Disabled: Events, ScreenUpdating, AutoRecover, Interactive, AskToUpdateLinks | Removes background overhead |
 | `IOleMessageFilter` + per-run retry on transient `COMException`s             | Automatic recovery from Excel-busy errors |
@@ -187,7 +187,7 @@ BatchExcel/
 
 ## Testing
 
-The `BatchExcel.Tests` project (xUnit) currently includes **69 tests** covering:
+The `BatchExcel.Tests` project (xUnit) currently includes **72 tests** covering:
 
 - `BatcherReader` — round-trips against generated `.xlsx` fixtures (no Excel required)
 - `OpenXmlHelpers` / `SheetWriter` — cell reference math, indexed bulk writes, typed-value coverage (`double` / `int` / `long` / `float` / `decimal` / `bool` / `DateTime`)
@@ -195,6 +195,7 @@ The `BatchExcel.Tests` project (xUnit) currently includes **69 tests** covering:
 - `BatchConfig` — macro parsing, included-run count
 - `FileNameSanitizer` — invalid character handling
 - `UserSettings` — load / save round-trip
+- `ExcelProcessTracker` — PID tracking, kill-only-running semantics, `SafeQuitExcel` kill-fallback (via mocked `IProcessInterop`)
 
 ```powershell
 dotnet test
