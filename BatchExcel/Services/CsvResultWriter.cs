@@ -14,17 +14,17 @@ public static class CsvResultWriter
 
     /// <summary>
     /// Writes results to CSV. Output format:
-    /// Index, Title, Status, [output field columns...]
+    /// Index, Title, Status, Duration (ms), [output field columns...]
     /// </summary>
     public static void Write(string outFolder, BatchConfig config)
     {
         string csvPath = Path.Combine(outFolder, FileName);
         using var writer = new StreamWriter(csvPath);
 
-        // Header row: identification columns + output field column headers.
+        // Header row: identification columns + duration + output field column headers.
         // Every header is run through EscapeCsv so future field/sheet names that happen to contain
         // commas, quotes, or formula-leading chars cannot corrupt the CSV.
-        var header = new List<string> { "Index", "Title", "Status" };
+        var header = new List<string> { "Index", "Title", "Status", "Duration (ms)" };
         header.AddRange(config.OutputFields.Select(f => $"{f.Sheet}_{f.Range}"));
         writer.WriteLine(string.Join(",", header.Select(EscapeCsv)));
 
@@ -41,11 +41,17 @@ public static class CsvResultWriter
             else
                 status = "Completed";
 
-            var row = new List<string>(3 + config.OutputFields.Count)
+            // Duration is null for skipped/failed/never-executed runs — render as blank cell
+            // rather than "0" so spreadsheet sorts/filters distinguish "didn't run" from
+            // "ran in <1 ms".
+            var duration = run.DurationMs?.ToString(CultureInfo.InvariantCulture) ?? "";
+
+            var row = new List<string>(4 + config.OutputFields.Count)
             {
                 (run.Index + 1).ToString(CultureInfo.InvariantCulture),
                 run.Title,
-                status
+                status,
+                duration
             };
 
             if (run.Results != null)

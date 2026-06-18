@@ -1,4 +1,6 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using BatchExcel.Models;
@@ -47,6 +49,13 @@ internal sealed class ExcelWorker(WorkerContext ctx)
             if (pid != 0) ExcelProcessTracker.Track(pid);
 
             ctx.Log($"\t[Worker {ctx.WorkerId}] Excel started (PID: {pid})");
+
+            // Probe Excel version + bitness on worker 1 only (workers run identical Excel
+            // installations, so logging once is enough). 32-bit Excel caps process memory at
+            // ~2 GB regardless of host RAM, which surfaces as silent OOM crashes on large
+            // workbooks — surfacing this proactively saves a lot of "why did it die" support.
+            if (ctx.WorkerId == 1)
+                LogExcelEnvironment(excelApp, ctx.Log);
 
             // Execute processing in a nested scope so local COM references 
             // naturally go out of scope before we trigger the GC collection.
@@ -228,6 +237,12 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         (dynamic sheet, dynamic range, int offset)[] inputRangeCache,
         dynamic[] outputRangeCache)
     {
+        // Time the calculation portion only (input write → calc → macro → output read).
+        // Save artifacts are excluded so the number reflects pure calc cost — the useful
+        // figure for diagnosing slow runs across a large batch. Stopwatch is allocation-free
+        // via ValueStopwatch... but we use Stopwatch here for clarity (one alloc per run).
+        var sw = Stopwatch.StartNew();
+
         // Populate input fields using cached range references
         for (var i = 0; i < inputRangeCache.Length; i++)
         {
@@ -246,10 +261,18 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         // and calling .Calculate on each sheet instead.
         excelApp.Calculate();
 
-        // Run any configured macros
+        // Run any configured macros. excelApp.Run is dynamic so the return value is whatever
+        // the VBA Function returned (Subs return null/empty). Surfacing non-empty returns
+        // gives users a debug channel for VBA — they can `LastError = "bad inputs"` from a
+        // wrapper Function and see it in batch_log.log without writing into a sheet cell.
+        // VBA Err.Raise propagates as COMException and is caught by the retry loop above,
+        // so this block only handles intentional return-value reporting.
         foreach (var macroName in ctx.Macros)
         {
-            excelApp.Run(macroName);
+            object? ret = excelApp.Run(macroName);
+            var retStr = Convert.ToString(ret, CultureInfo.InvariantCulture);
+            if (!string.IsNullOrWhiteSpace(retStr))
+                ctx.Log($"\t[Worker {ctx.WorkerId}] macro '{macroName}' on '{run.Title}' returned: {retStr.Trim()}");
         }
 
         // Read output fields using cached range references
@@ -258,6 +281,10 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         {
             results[f] = outputRangeCache[f].Value;
         }
+
+        sw.Stop();
+        run.DurationMs = sw.ElapsedMilliseconds;
+
         // Assign Results BEFORE the optional save+PDF block. If SaveCopyAs / ExportAsFixedFormat
         // throws (disk full, locked, malformed PDF sheet name) we still want the calculated
         // values written to CSV — the save artifact is a convenience, not the canonical result.
@@ -280,7 +307,7 @@ internal sealed class ExcelWorker(WorkerContext ctx)
             }
         }
 
-        ctx.Log($"\t> ({run.Index + 1}/{ctx.Config.Calculations.Count}) {run.Title}...done. [Worker {ctx.WorkerId}]");
+        ctx.Log($"\t> ({run.Index + 1}/{ctx.Config.Calculations.Count}) {run.Title}...done in {run.DurationMs} ms. [Worker {ctx.WorkerId}]");
     }
 
     private void SaveRunArtifacts(dynamic workbook, BatchRun run)
@@ -336,6 +363,36 @@ internal sealed class ExcelWorker(WorkerContext ctx)
                 log($"\t[Worker {workerId}] WARNING: SetCalculationMode failed after {maxRetries} attempts: {ex.Message}. " +
                     "Batch may run significantly slower if Excel stays in automatic calc mode.");
             }
+        }
+    }
+
+    /// <summary>
+    /// Best-effort log of the Excel runtime environment (version, build, OS bitness). Wrapped
+    /// in a try/catch because some Excel installs / older versions may not expose every
+    /// property — a probe failure must never abort the batch. Specifically warns when
+    /// 32-bit Excel is detected: large workbooks can silently exhaust the ~2 GB process
+    /// memory cap regardless of host RAM.
+    /// </summary>
+    private static void LogExcelEnvironment(dynamic excelApp, Action<string> log)
+    {
+        try
+        {
+            string version = Convert.ToString(excelApp.Version, CultureInfo.InvariantCulture) ?? "?";
+            string build = Convert.ToString(excelApp.Build, CultureInfo.InvariantCulture) ?? "?";
+            string os = Convert.ToString(excelApp.OperatingSystem, CultureInfo.InvariantCulture) ?? "?";
+
+            log($"\tExcel runtime: version {version} (build {build}) on {os}");
+
+            if (os.Contains("32-bit", StringComparison.OrdinalIgnoreCase))
+            {
+                log("\tWARNING: 32-bit Excel detected. Large workbooks may exhaust the ~2 GB " +
+                    "process memory cap regardless of host RAM, surfacing as silent worker " +
+                    "crashes. Consider installing 64-bit Excel for batches with large templates.");
+            }
+        }
+        catch (Exception ex)
+        {
+            log($"\t(Excel environment probe failed: {ex.Message})");
         }
     }
 }

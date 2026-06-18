@@ -40,23 +40,45 @@ public class CsvResultWriterTests : IDisposable
 
         string csv = ReadCsv();
         var lines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal("Index,Title,Status,Sheet1_B1,Sheet1_C1", lines[0].TrimEnd('\r'));
+        Assert.Equal("Index,Title,Status,Duration (ms),Sheet1_B1,Sheet1_C1", lines[0].TrimEnd('\r'));
     }
 
     [Fact]
     public void Write_DistinguishesCompletedSkippedAndFailed()
     {
         var cfg = MakeConfig(
-            new BatchRun { Index = 0, Include = true, Title = "OK", Results = new object?[] { 1.0, 2.0 } },
+            new BatchRun { Index = 0, Include = true, Title = "OK", Results = new object?[] { 1.0, 2.0 }, DurationMs = 123 },
             new BatchRun { Index = 1, Include = false, Title = "Skip" },
             new BatchRun { Index = 2, Include = true, Title = "Fail", Results = null });
 
         CsvResultWriter.Write(_tempDir, cfg);
         string csv = ReadCsv();
 
-        Assert.Contains("1,OK,Completed,1,2", csv);
-        Assert.Contains("2,Skip,Skipped,,", csv);
-        Assert.Contains("3,Fail,Failed,,", csv);
+        // Completed: duration column populated; Skipped/Failed: duration blank, output cols blank.
+        Assert.Contains("1,OK,Completed,123,1,2", csv);
+        Assert.Contains("2,Skip,Skipped,,,", csv);
+        Assert.Contains("3,Fail,Failed,,,", csv);
+    }
+
+    [Fact]
+    public void Write_DurationColumn_BlankWhenDurationMsIsNull()
+    {
+        // Manually-constructed BatchRun with Results but no DurationMs — covers the
+        // unlikely-but-possible case where a run completes without timing data (e.g. a
+        // future code path that bypasses the Stopwatch in ExcelWorker).
+        var cfg = MakeConfig(
+            new BatchRun
+            {
+                Index = 0, Include = true, Title = "Untimed",
+                Results = new object?[] { 7.0, 8.0 },
+                DurationMs = null
+            });
+
+        CsvResultWriter.Write(_tempDir, cfg);
+        string csv = ReadCsv();
+
+        // Duration cell is blank (",,"), output values follow.
+        Assert.Contains("1,Untimed,Completed,,7,8", csv);
     }
 
     [Fact]

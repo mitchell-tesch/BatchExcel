@@ -25,6 +25,8 @@ Built with C# / WPF / .NET 10, BatchExcel drives multiple Excel instances simult
 - **Indexed bulk writes** — A custom `SheetWriter` pre-indexes rows and cells so the result-writing pass is O(1) per cell instead of O(rows × cells). Comfortably handles tens of thousands of output cells.
 - **User calculation is never modified** — Per-worker copies are made *first*, then the date / job-number headers are written into those copies. The source template on disk is left untouched.
 - **Save & PDF export** — Optionally saves a calculated copy of the calculation per run, and/or exports a configured set of sheets to a PDF.
+- **Per-run timing** — Every successful run's wall-clock calc duration (ms) is written to `raw_output_fields.csv` for quick "which run is slow" diagnostics.
+- **Fail-fast preflight** — Path length (Excel's 218-char COM cap) and projected disk usage (worker copies + optional save artifacts) are checked *before* any Excel process is launched, so misconfigured batches die early with an actionable message.
 - **Safe CSV output** — Values starting with `=`, `+`, `-`, or `@` are neutralised against CSV/formula injection when opened in Excel/LibreOffice.
 - **Modern Fluent UI** — Windows 11 Fluent Design via [WPF-UI](https://github.com/lepoco/wpfui): `FluentWindow` with **Mica** backdrop, Excel-green accent (overrides the system accent), Fluent controls (`ToggleSwitch`, `NumberBox`, `Card`, `ProgressRing`, symbol-icon buttons & menus). The app auto-follows the Windows light/dark theme.
 - **Settings persisted** — Last-used batcher path, worker count, save-runs toggle and PDF sheet list are saved to `%AppData%\BatchExcel\settings.json` (debounced so the file isn't rewritten on every keystroke).
@@ -121,6 +123,8 @@ Per-row conventions inside the data table:
 | `Skipped`   | Run excluded by `Status ≠ Yes` |
 | `Failed`    | Run included but raised an exception (after retries); output columns are blank |
 
+Columns are: **Index, Title, Status, Duration (ms), [output fields…]**. The duration column is the wall-clock calc time for each run (input write → `Application.Calculate` → macros → output read), excluding optional save / PDF export. Skipped and failed runs leave it blank.
+
 Numbers are written using `InvariantCulture` (decimal point, no thousands separator). Strings beginning with `=`, `+`, `-`, or `@` are prefixed with a single quote so they aren't interpreted as formulas when the CSV is opened in Excel/LibreOffice.
 
 ## Architecture
@@ -158,15 +162,17 @@ BatchExcel/
 ```
 1. Read config         BatcherReader.ReadConfig          ClosedXML, direct file (~50 ms)
 2. Validate template   CalculationValidator.Validate     OpenXML, fail-fast dry run (~10 ms)
-3. Copy Calculation    one .xlsx per worker              File.Copy × N
-4. Write headers       CalculationHeaderWriter.Write     OpenXML on each copy (~20 ms)
-5. Launch workers      RunOnStaThread                    STA + IOleMessageFilter, staggered
-6. Process runs        ExcelWorker.ProcessRunQueue       Cached COM refs → Calculate() → read
+3. Preflight paths     BatchEngine.RunAsync              Excel 218-char cap + disk-space check
+4. Copy Calculation    one .xlsx per worker              File.Copy × N
+5. Write headers       CalculationHeaderWriter.Write     OpenXML on each copy (~20 ms)
+6. Launch workers      RunOnStaThread                    STA + IOleMessageFilter, staggered
+7. Process runs        ExcelWorker.ProcessRunQueue       Cached COM refs → Calculate() → read
+                                                         + Stopwatch per run (CSV duration column)
                                                          + per-run Save & PDF (optional)
-7. Release & quit      ExcelWorker finally               FinalReleaseComObject + SafeQuitExcel
-8. Write results       BatcherReader.WriteResults        Single OpenXML pass → File.Copy ×2
-9. Write CSV           CsvResultWriter.Write             StreamWriter, injection-safe escaping
-10. Cleanup            Delete worker copies              KillAllTracked on exit / on errors
+8. Release & quit      ExcelWorker finally               FinalReleaseComObject + SafeQuitExcel
+9. Write results       BatcherReader.WriteResults        Single OpenXML pass → File.Copy ×2
+10. Write CSV          CsvResultWriter.Write             StreamWriter, injection-safe escaping
+11. Cleanup            Delete worker copies              KillAllTracked on exit / on errors
 ```
 
 ### Performance design
@@ -189,18 +195,18 @@ BatchExcel/
 
 ## Testing
 
-The `BatchExcel.Tests` project (xUnit) currently includes **125 tests** covering:
+The `BatchExcel.Tests` project (xUnit) currently includes **135 tests** covering:
 
 - `BatcherReader` — round-trips against generated `.xlsx` fixtures (no Excel required)
 - `OpenXmlHelpers` / `SheetWriter` — cell reference math, indexed bulk writes, Excel column-order sorting (B before AA, not lexicographic), append-fast-path correctness, typed-value coverage (`double` / `int` / `long` / `float` / `decimal` / `bool` / `DateTime`)
-- `CsvResultWriter` — escaping, status distinction, formula-injection neutralisation, negative-number numeric-preservation (no formula-prefix on legitimate negatives), invariant-culture numbers
+- `CsvResultWriter` — escaping, status distinction, formula-injection neutralisation, negative-number numeric-preservation (no formula-prefix on legitimate negatives), invariant-culture numbers, per-run duration column
 - `BatchConfig` — macro parsing, included-run count
 - `CalculationValidator` — dry-run validation: sheet existence, A1 and named-range resolution, error aggregation, corrupt-file handling
 - `FileNameSanitizer` — invalid character handling
 - `UserSettings` — load / save round-trip
 - `ExcelProcessTracker` — PID tracking, kill-only-running semantics, `SafeQuitExcel` kill-fallback (via mocked `IProcessInterop`)
 - `IoRetry` — transient vs non-transient `IOException` classification, retry exhaustion, non-IO exception pass-through
-- `BatchEngine` — Cancel/WasCancelled semantics, Cancel-after-Dispose safety, idempotent Dispose, failure-path cleanup
+- `BatchEngine` — Cancel/WasCancelled semantics, Cancel-after-Dispose safety, idempotent Dispose, failure-path cleanup, disk-space preflight estimate + threshold
 
 ```powershell
 dotnet test

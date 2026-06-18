@@ -15,6 +15,15 @@ public class BatchRun
     public string Title { get; init; } = "";
     public object?[] Data { get; init; } = [];
     public object?[]? Results { get; set; }
+
+    /// <summary>
+    /// Wall-clock duration of the calculation portion of the run in milliseconds, or null
+    /// if the run was skipped / never executed. Populated by <see cref="Services.ExcelWorker"/>
+    /// just before <see cref="Results"/> is assigned, so save-artifact time is excluded —
+    /// the number reflects "Excel calc + macro + read" only, which is the useful figure for
+    /// identifying slow runs in a large batch.
+    /// </summary>
+    public long? DurationMs { get; set; }
 }
 
 /// <summary>

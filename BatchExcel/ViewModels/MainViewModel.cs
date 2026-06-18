@@ -296,6 +296,23 @@ public partial class MainViewModel : ObservableObject
             if (killedPath > 0)
                 AppendLog($"\nCleaned up {killedPath} zombie Excel process(es).");
         }
+        catch (InsufficientDiskSpaceException ex)
+        {
+            // Disk-space preflight in BatchEngine.RunAsync. Same UX shape as
+            // PathTooLongException — no stack trace clutter, message is already actionable.
+            AppendLog($"\n*** ERROR: {ex.Message} ***");
+            ProgressText = "Failed: insufficient disk space";
+            HasError = true;
+
+            NotificationRequested?.Invoke(
+                "Insufficient disk space",
+                ex.Message,
+                NotificationKind.Error);
+
+            var killedDisk = ExcelProcessTracker.KillAllTracked();
+            if (killedDisk > 0)
+                AppendLog($"\nCleaned up {killedDisk} zombie Excel process(es).");
+        }
         catch (ValidationException vex)
         {
             // Configuration mistake (missing sheet, bad range, corrupt template, etc.).

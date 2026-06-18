@@ -6,6 +6,16 @@ using BatchExcel.Models;
 namespace BatchExcel.Services;
 
 /// <summary>
+/// Thrown by the disk-space preflight in <see cref="BatchEngine.RunAsync"/> when the volume
+/// hosting the output folder doesn't have enough free space for the projected worker copies
+/// + per-run save artifacts. Carries a user-friendly message that the UI surfaces directly.
+/// </summary>
+public class InsufficientDiskSpaceException : Exception
+{
+    public InsufficientDiskSpaceException(string message) : base(message) { }
+}
+
+/// <summary>
 /// Orchestrates parallel batch processing of Excel calculations.
 /// Delegates per-worker COM logic to <see cref="ExcelWorker"/> and file I/O to
 /// <see cref="BatcherReader"/>, <see cref="CalculationHeaderWriter"/>, and <see cref="CsvResultWriter"/>.
@@ -120,6 +130,17 @@ public class BatchEngine : IDisposable
             Log("\nERROR: " + msg);
             throw new PathTooLongException(msg);
         }
+
+        // Step 4c: Preflight disk space. Save artifacts (xlsx + PDF) for a large batch can run
+        // into tens of GB; failing 800 runs in because the volume filled at run 600 leaves the
+        // output folder in a half-finished state that's hard to recover. Same fail-fast
+        // philosophy as the path-length preflight above. Best-effort: if DriveInfo can't
+        // resolve (UNC paths, exotic mounts) we skip the check rather than block the batch.
+        var sourceSize = SafeGetFileSize(calculationFullPath);
+        var requiredBytes = EstimateRequiredDiskBytes(
+            sourceSize, effectiveWorkers, includedCount, saveRuns, pdfSheets.Count);
+        var availableBytes = GetAvailableFreeSpace(outFolder);
+        EnsureSufficientDiskSpace(requiredBytes, availableBytes, outFolder);
 
         // Step 5: Create a single staging copy of the calculation in the output folder, write the
         // headers into it once via OpenXML, then duplicate it for each worker. Header inputs are
@@ -328,6 +349,87 @@ public class BatchEngine : IDisposable
         if (string.IsNullOrWhiteSpace(raw))
             return [];
         return raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
+    }
+
+    /// <summary>
+    /// Conservative lower bound on the disk space the batch will consume: worker calc
+    /// copies + transient staged file + optional per-run save artifacts (xlsx + PDF) +
+    /// fixed log/CSV overhead. Pure function so it can be unit-tested without a live disk.
+    /// </summary>
+    internal static long EstimateRequiredDiskBytes(
+        long sourceSize,
+        int effectiveWorkers,
+        int includedRunCount,
+        bool saveRuns,
+        int pdfSheetCount)
+    {
+        if (sourceSize < 0) sourceSize = 0;
+        if (effectiveWorkers < 1) effectiveWorkers = 1;
+        if (includedRunCount < 0) includedRunCount = 0;
+
+        // Worker calc copies (held for the lifetime of the batch). +1 for the transient
+        // staged file that exists during fan-out — short-lived, but counted so the peak
+        // disk footprint is covered rather than the steady-state footprint.
+        var workerCopies = (effectiveWorkers + 1) * sourceSize;
+
+        // Optional per-run saved xlsx — each is a SaveCopyAs of the open workbook (~ source size).
+        var savedXlsx = saveRuns ? includedRunCount * sourceSize : 0L;
+
+        // Optional per-run PDF — proxy ~max(sourceSize/4, 256 KB) per PDF. Generous enough
+        // to cover dense engineering PDFs without being wildly oversized for tiny templates.
+        var savedPdf = pdfSheetCount > 0
+            ? includedRunCount * Math.Max(sourceSize / 4, 256L * 1024)
+            : 0L;
+
+        // Fixed overhead for batcher copy + log file + CSV.
+        const long fixedOverhead = 10L * 1024 * 1024;
+
+        return workerCopies + savedXlsx + savedPdf + fixedOverhead;
+    }
+
+    /// <summary>
+    /// Throws <see cref="InsufficientDiskSpaceException"/> with an actionable message if the
+    /// available free space is below required + a 100 MB safety margin. Pure function for
+    /// unit testing — callers pass <c>availableBytes</c> directly.
+    /// </summary>
+    internal static void EnsureSufficientDiskSpace(long requiredBytes, long availableBytes, string outFolder)
+    {
+        // Safety margin for OS / Excel / AV scratch space + last-mile rounding error in the
+        // estimate. 100 MB is small enough that batches sized for the actual disk pass through,
+        // but large enough that we don't fill the volume on a tight squeeze.
+        const long safetyMarginBytes = 100L * 1024 * 1024;
+        var need = requiredBytes + safetyMarginBytes;
+        if (availableBytes >= need) return;
+
+        var msg = $"Insufficient free disk space on the volume containing '{outFolder}'. " +
+                  $"Need ~{FormatMb(need)} (estimate + safety margin); only {FormatMb(availableBytes)} available. " +
+                  "Free up disk space, disable Save Runs / PDF export, or choose a different output volume.";
+        throw new InsufficientDiskSpaceException(msg);
+
+        static string FormatMb(long bytes) =>
+            $"{bytes / (1024.0 * 1024.0):F0} MB";
+    }
+
+    private static long SafeGetFileSize(string path)
+    {
+        try { return new FileInfo(path).Length; }
+        catch { return 0; }
+    }
+
+    private static long GetAvailableFreeSpace(string folder)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(folder));
+            if (string.IsNullOrEmpty(root)) return long.MaxValue;
+            return new DriveInfo(root).AvailableFreeSpace;
+        }
+        catch
+        {
+            // DriveInfo can fail on UNC paths or unmounted volumes — skip the check rather
+            // than blocking the batch on a sentinel-only failure mode.
+            return long.MaxValue;
+        }
     }
 
     /// <summary>
