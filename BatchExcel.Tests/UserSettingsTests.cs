@@ -9,7 +9,6 @@ public class UserSettingsTests
     {
         var settings = new UserSettings();
 
-        Assert.Equal(4, settings.WorkerCount);
         Assert.True(settings.SaveRuns);
         Assert.Equal("", settings.PdfSheets);
         Assert.Equal("", settings.LastBatcherFilePath);
@@ -22,7 +21,6 @@ public class UserSettingsTests
         // (or the deserialized settings if one already exists - both paths covered by other tests)
         var settings = UserSettings.Load();
         Assert.NotNull(settings);
-        Assert.True(settings.WorkerCount > 0);
     }
 }
 

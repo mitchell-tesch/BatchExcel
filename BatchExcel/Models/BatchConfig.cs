@@ -1,4 +1,6 @@
-﻿namespace BatchExcel.Models;
+﻿using System.Globalization;
+
+namespace BatchExcel.Models;
 
 /// <summary>
 /// Defines a cell field mapping in the calculation workbook.
@@ -10,7 +12,18 @@ public record FieldDefinition(string Sheet, string Range, int ColumnOffset);
 /// </summary>
 public class BatchRun
 {
+    private readonly string? _runId;
+
+    /// <summary>Zero-based row position in the data table; used to write results back to the right row.</summary>
     public int Index { get; init; }
+
+    /// <summary>The batcher sheet's Run ID (column A), or the 1-based row position if blank. IDs can have gaps.</summary>
+    public string RunId
+    {
+        get => string.IsNullOrEmpty(_runId) ? (Index + 1).ToString(CultureInfo.InvariantCulture) : _runId;
+        init => _runId = value;
+    }
+
     public bool Include { get; init; }
     public string Title { get; init; } = "";
     public object?[] Data { get; init; } = [];
@@ -24,6 +37,9 @@ public class BatchRun
     /// identifying slow runs in a large batch.
     /// </summary>
     public long? DurationMs { get; set; }
+
+    /// <summary>Number of times an Excel process died while processing this run.</summary>
+    public int ExcelCrashCount { get; set; }
 }
 
 /// <summary>

@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using BatchExcel.Models;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 
@@ -193,6 +194,11 @@ internal static class OpenXmlHelpers
         {
             cell.CellValue = new CellValue(dt.ToOADate().ToString(CultureInfo.InvariantCulture));
             cell.DataType = null;
+        }
+        else if (value is ExcelError { IsStandard: true } err)
+        {
+            cell.CellValue = new CellValue(err.Text);
+            cell.DataType = CellValues.Error;
         }
         else
         {

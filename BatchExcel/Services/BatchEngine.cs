@@ -165,7 +165,7 @@ public class BatchEngine : IDisposable
         // Log skipped runs
         foreach (var run in config.Calculations.Where(r => !r.Include))
         {
-            Log($"\t> ({run.Index + 1}/{totalCount}) {run.Title} - skipped.");
+            Log($"\t> (ID {run.RunId}) {run.Title} - skipped.");
         }
 
         try
@@ -187,9 +187,14 @@ public class BatchEngine : IDisposable
         if (!_wasCancelled && !runQueue.IsEmpty)
         {
             var undone = runQueue.Count;
-            throw new InvalidOperationException(
-                $"Batch aborted: {undone} run(s) were never processed because every worker failed to start. " +
-                "See the log above for the per-worker failure reason.");
+            if (_completedRuns == 0)
+                throw new InvalidOperationException(
+                    $"Batch aborted: {undone} run(s) were never processed because every worker failed to start. " +
+                    "See the log above for the per-worker failure reason.");
+
+            // Workers gave up after repeated Excel crashes — still write the results we do have.
+            Log($"\nWARNING: {undone} run(s) were never processed because every worker stopped " +
+                "(Excel crashed repeatedly). They are reported as Failed.");
         }
 
         // Step 7: Write results back (direct file access — no Excel needed).

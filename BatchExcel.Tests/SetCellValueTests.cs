@@ -61,6 +61,30 @@ public class SetCellValueTests
     }
 
     [Fact]
+    public void SetCellValue_StandardExcelError_UsesErrorType()
+    {
+        var sheetData = new SheetData();
+
+        OpenXmlHelpers.SetCellValue(sheetData, 1, 1, new BatchExcel.Models.ExcelError("#DIV/0!"));
+
+        var cell = sheetData.Elements<Row>().Single().Elements<Cell>().Single();
+        Assert.Equal("#DIV/0!", cell.CellValue?.Text);
+        Assert.Equal(CellValues.Error, cell.DataType?.Value);
+    }
+
+    [Fact]
+    public void SetCellValue_NonStandardExcelError_WrittenAsString()
+    {
+        var sheetData = new SheetData();
+
+        OpenXmlHelpers.SetCellValue(sheetData, 1, 1, new BatchExcel.Models.ExcelError("#SPILL!"));
+
+        var cell = sheetData.Elements<Row>().Single().Elements<Cell>().Single();
+        Assert.Equal("#SPILL!", cell.CellValue?.Text);
+        Assert.Equal(CellValues.String, cell.DataType?.Value);
+    }
+
+    [Fact]
     public void SetCellValue_MultipleCellsInRow_PreservesColumnOrder()
     {
         var sheetData = new SheetData();

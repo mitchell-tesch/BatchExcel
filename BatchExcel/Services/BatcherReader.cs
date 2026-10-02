@@ -133,6 +133,7 @@ public static class BatcherReader
             config.Calculations.Add(new BatchRun
             {
                 Index = r - DataHeaderRowCount,
+                RunId = sheet.Cell(row, DataStartCol - 1).GetString().Trim(),
                 Include = include,
                 Title = title,
                 Data = data

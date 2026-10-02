@@ -162,6 +162,41 @@ public class BatcherReaderTests : IDisposable
     }
 
     [Fact]
+    public void ReadConfig_RunId_ComesFromColumnA_IndexStaysRowPosition()
+    {
+        string path = CreateBatcherFixture(runs:
+        [
+            ("Alpha", true, new object?[] { 1.0 }),
+            ("Beta",  true, new object?[] { 2.0 }),
+        ]);
+        using (var wb = new XLWorkbook(path))
+        {
+            wb.Worksheet("Main").Cell(18, 1).Value = 264;
+            wb.Worksheet("Main").Cell(19, 1).Value = 295;
+            wb.Save();
+        }
+
+        var cfg = BatcherReader.ReadConfig(path);
+
+        Assert.Equal(new[] { "264", "295" }, cfg.Calculations.Select(r => r.RunId).ToArray());
+        Assert.Equal(new[] { 0, 1 }, cfg.Calculations.Select(r => r.Index).ToArray());
+    }
+
+    [Fact]
+    public void ReadConfig_BlankRunId_FallsBackToRowPosition()
+    {
+        string path = CreateBatcherFixture(runs:
+        [
+            ("Alpha", true, new object?[] { 1.0 }),
+            ("Beta",  true, new object?[] { 2.0 }),
+        ]);
+
+        var cfg = BatcherReader.ReadConfig(path);
+
+        Assert.Equal(new[] { "1", "2" }, cfg.Calculations.Select(r => r.RunId).ToArray());
+    }
+
+    [Fact]
     public void WriteResults_RoundTripsOutputValues()
     {
         string path = CreateBatcherFixture(

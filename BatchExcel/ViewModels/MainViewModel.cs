@@ -29,10 +29,13 @@ public partial class MainViewModel : ObservableObject
     {
         _settings = UserSettings.Load();
         _batcherFilePath = _settings.LastBatcherFilePath;
-        _workerCount = _settings.WorkerCount;
+        // Excel calc is CPU-bound, so hyper-threads add little; start safe at one less than the physical cores.
+        _workerCount = Math.Max(1, CpuInfo.PhysicalCoreCount() - 1);
         _saveRuns = _settings.SaveRuns;
         _pdfSheets = _settings.PdfSheets;
     }
+
+    public int MaxWorkerCount { get; } = Math.Max(1, Environment.ProcessorCount - 1);
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RunBatchCommand))]
@@ -78,7 +81,6 @@ public partial class MainViewModel : ObservableObject
     // Persist settings whenever a user-editable property changes (debounced to avoid
     // a disk write on every keystroke when bindings use UpdateSourceTrigger=PropertyChanged).
     partial void OnBatcherFilePathChanged(string value) => SchedulePersistSettings();
-    partial void OnWorkerCountChanged(int value) => SchedulePersistSettings();
     partial void OnSaveRunsChanged(bool value) => SchedulePersistSettings();
     partial void OnPdfSheetsChanged(string value) => SchedulePersistSettings();
 
@@ -113,7 +115,6 @@ public partial class MainViewModel : ObservableObject
     private void PersistSettings()
     {
         _settings.LastBatcherFilePath = BatcherFilePath;
-        _settings.WorkerCount = WorkerCount;
         _settings.SaveRuns = SaveRuns;
         _settings.PdfSheets = PdfSheets;
         _settings.Save();

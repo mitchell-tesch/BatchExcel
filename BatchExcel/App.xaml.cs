@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using System.Runtime.InteropServices;
+using System.Windows;
 using System.Windows.Media;
 using BatchExcel.Services;
 using Wpf.Ui.Appearance;
@@ -48,7 +49,13 @@ public partial class App
 
         DispatcherUnhandledException += (_, args) =>
         {
-            ExcelProcessTracker.KillAllTracked();
+            args.Handled = true;
+
+            // UIA_E_ELEMENTNOTAVAILABLE: an accessibility / text-input client lost track of a UI element. Benign.
+            if (args.Exception.GetBaseException() is COMException { HResult: unchecked((int)0x80040201) })
+                return;
+
+            // No KillAllTracked here: the app keeps running, so a UI error must not kill an in-progress batch.
             var msg = new Wpf.Ui.Controls.MessageBox
             {
                 Title = "BatchExcel Error",
@@ -56,7 +63,6 @@ public partial class App
                 CloseButtonText = "OK",
             };
             msg.ShowDialogAsync();
-            args.Handled = true;
         };
     }
 

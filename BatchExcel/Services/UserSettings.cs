@@ -15,7 +15,6 @@ public class UserSettings
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    public int WorkerCount { get; set; } = 4;
     public bool SaveRuns { get; set; } = true;
     public string PdfSheets { get; set; } = "";
     public string LastBatcherFilePath { get; set; } = "";

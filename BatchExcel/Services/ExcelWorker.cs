@@ -34,13 +34,49 @@ internal sealed class ExcelWorker(WorkerContext ctx)
     // Excel XlCalculation enum values
     private const int XlCalculationManual = -4135;
 
+    private const int MaxCrashesWithoutProgress = 3;
+    private const int MaxExcelCrashesPerRun = 2;
+
+    private int _sessionRunsCompleted;
+
     /// <summary>
     /// Runs the worker loop. Must be invoked on an STA thread with a registered COM message filter.
+    /// If the Excel process dies mid-batch, a fresh instance is started; the worker only gives up
+    /// after <see cref="MaxCrashesWithoutProgress"/> consecutive crashes that completed no runs.
     /// </summary>
     public void Run()
     {
+        var restarts = 0;
+        var crashesWithoutProgress = 0;
+        while (RunExcelSession())
+        {
+            if (ctx.CancellationToken.IsCancellationRequested || ctx.RunQueue.IsEmpty)
+                return;
+
+            crashesWithoutProgress = _sessionRunsCompleted > 0 ? 0 : crashesWithoutProgress + 1;
+            if (crashesWithoutProgress >= MaxCrashesWithoutProgress)
+            {
+                ctx.Log($"\t[Worker {ctx.WorkerId}] Excel crashed {crashesWithoutProgress} times in a row without completing a run; " +
+                        "worker stopping. Remaining runs are left for the other workers.");
+                return;
+            }
+
+            restarts++;
+            ctx.Log($"\t[Worker {ctx.WorkerId}] Restarting Excel (restart #{restarts})...");
+            // Give Windows a moment to reclaim the dead process's memory before starting another.
+            ctx.CancellationToken.WaitHandle.WaitOne(2000);
+        }
+    }
+
+    /// <summary>
+    /// Runs one Excel instance until the queue is empty. Returns true if the Excel process died
+    /// and the worker should restart it.
+    /// </summary>
+    private bool RunExcelSession()
+    {
         dynamic? excelApp = null;
         uint pid = 0;
+        _sessionRunsCompleted = 0;
 
         try
         {
@@ -60,10 +96,17 @@ internal sealed class ExcelWorker(WorkerContext ctx)
             // Execute processing in a nested scope so local COM references 
             // naturally go out of scope before we trigger the GC collection.
             ExecuteRunLoop(excelApp);
+            return false;
+        }
+        catch (COMException ex) when (IsExcelUnavailable(ex))
+        {
+            ctx.Log($"\t[Worker {ctx.WorkerId}] Excel process (PID: {pid}) terminated unexpectedly: {ex.Message}");
+            return true;
         }
         catch (Exception ex)
         {
             ctx.Log($"\t[Worker {ctx.WorkerId}] FAILED: {ex.Message}");
+            return false;
         }
         finally
         {
@@ -182,6 +225,25 @@ internal sealed class ExcelWorker(WorkerContext ctx)
             {
                 ProcessSingleRunWithRetry(excelApp, workbook, run, inputRangeCache, outputRangeCache);
             }
+            catch (COMException ex) when (IsExcelUnavailable(ex))
+            {
+                // Excel is gone. Stop dequeuing (every further call would fail instantly and drain
+                // the queue out from under the healthy workers) and let Run() restart Excel.
+                // The in-flight run gets one more chance unless it has already crashed Excel before.
+                if (++run.ExcelCrashCount < MaxExcelCrashesPerRun)
+                {
+                    ctx.Log($"\t[Worker {ctx.WorkerId}] Excel crashed during run '{run.Title}': {ex.Message} Run re-queued.");
+                    ctx.RunQueue.Enqueue(run);
+                }
+                else
+                {
+                    ctx.Log($"\t[Worker {ctx.WorkerId}] ERROR on run '{run.Title}': {ex.Message} " +
+                            $"(Excel crashed on this run {run.ExcelCrashCount} times; marked Failed).");
+                    run.Results = null;
+                    ctx.ReportRunCompleted();
+                }
+                throw;
+            }
             catch (Exception ex)
             {
                 ctx.Log($"\t[Worker {ctx.WorkerId}] ERROR on run '{run.Title}': {ex.Message}");
@@ -189,6 +251,7 @@ internal sealed class ExcelWorker(WorkerContext ctx)
                 run.Results = null;
             }
 
+            _sessionRunsCompleted++;
             ctx.ReportRunCompleted();
         }
 
@@ -230,13 +293,26 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         ex.HResult == unchecked((int)0x80010005) || // RPC_E_SERVERCALL_RETRYLATER
         ex.HResult == unchecked((int)0x800AC472);   // VBA_E_IGNORE (Excel busy)
 
-    private void ProcessSingleRun(
+    /// <summary>True when the HRESULT means the Excel process has crashed, been killed, or disconnected.</summary>
+    internal static bool IsExcelUnavailable(COMException ex) =>
+        ex.HResult == unchecked((int)0x800706BA) || // RPC_S_SERVER_UNAVAILABLE
+        ex.HResult == unchecked((int)0x800706BE) || // RPC_S_CALL_FAILED
+        ex.HResult == unchecked((int)0x800706BF) || // RPC_S_CALL_FAILED_DNE
+        ex.HResult == unchecked((int)0x80010007) || // RPC_E_SERVER_DIED
+        ex.HResult == unchecked((int)0x80010012) || // RPC_E_SERVER_DIED_DNE
+        ex.HResult == unchecked((int)0x80010108);   // RPC_E_DISCONNECTED
+
+    internal void ProcessSingleRun(
         dynamic excelApp,
         dynamic workbook,
         BatchRun run,
         (dynamic sheet, dynamic range, int offset)[] inputRangeCache,
         dynamic[] outputRangeCache)
     {
+        // Macros often restore automatic calc / events on exit, which would make every input write below recalc.
+        if (ctx.Macros.Count > 0)
+            RestoreBatchAppState(excelApp);
+
         // Time the calculation portion only (input write → calc → macro → output read).
         // Save artifacts are excluded so the number reflects pure calc cost — the useful
         // figure for diagnosing slow runs across a large batch. Stopwatch is allocation-free
@@ -275,11 +351,15 @@ internal sealed class ExcelWorker(WorkerContext ctx)
                 ctx.Log($"\t[Worker {ctx.WorkerId}] macro '{macroName}' on '{run.Title}' returned: {retStr.Trim()}");
         }
 
+        // Calc is manual, so cells left dirty by the macros (e.g. after GoalSeek) must be recalculated before reading.
+        if (ctx.Macros.Count > 0)
+            excelApp.Calculate();
+
         // Read output fields using cached range references
         var results = new object?[outputRangeCache.Length];
         for (var f = 0; f < outputRangeCache.Length; f++)
         {
-            results[f] = outputRangeCache[f].Value;
+            results[f] = ExcelError.FromComValue((object?)outputRangeCache[f].Value);
         }
 
         sw.Stop();
@@ -307,7 +387,7 @@ internal sealed class ExcelWorker(WorkerContext ctx)
             }
         }
 
-        ctx.Log($"\t> ({run.Index + 1}/{ctx.Config.Calculations.Count}) {run.Title}...done in {run.DurationMs} ms. [Worker {ctx.WorkerId}]");
+        ctx.Log($"\t> (ID {run.RunId}) {run.Title}...done in {run.DurationMs} ms. [Worker {ctx.WorkerId}]");
     }
 
     private void SaveRunArtifacts(dynamic workbook, BatchRun run)
@@ -324,7 +404,7 @@ internal sealed class ExcelWorker(WorkerContext ctx)
         // ".pdf" and ".xlsx" are <= 5 chars, so reserving 5 for the extension swap is enough.
         var pathBudget = FileNameSanitizer.ExcelMaxPathLength - ctx.OutFolder.Length - 1;
         var runFileName = FileNameSanitizer.Sanitize(
-            $"{run.Index + 1}_{run.Title}_{ctx.CalculationSourceName}",
+            $"{run.RunId}_{run.Title}_{ctx.CalculationSourceName}",
             Math.Max(16, pathBudget));
         var runFilePath = Path.Combine(ctx.OutFolder, runFileName);
 
@@ -336,6 +416,14 @@ internal sealed class ExcelWorker(WorkerContext ctx)
             var pdfPath = Path.ChangeExtension(runFilePath, ".pdf");
             PdfExporter.Export(workbook, ctx.PdfSheets, pdfPath, ctx.Log);
         }
+    }
+
+    internal static void RestoreBatchAppState(dynamic excelApp)
+    {
+        excelApp.ScreenUpdating = false;
+        excelApp.EnableEvents = false;
+        excelApp.DisplayAlerts = false;
+        excelApp.Calculation = XlCalculationManual;
     }
 
     /// <summary>

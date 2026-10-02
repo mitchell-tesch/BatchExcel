@@ -17,7 +17,9 @@ Built with C# / WPF / .NET 10, BatchExcel drives multiple Excel instances simult
 ## Features
 
 - **Parallel processing** — Distributes batch runs across N Excel instances on dedicated STA threads with a shared `ConcurrentQueue` for automatic load balancing.
-- **Worker count is clamped** to `[1, ProcessorCount × 2]` and the number of included runs, so a stray digit can't accidentally spawn dozens of Excel instances.
+- **Worker count defaults to physical cores − 1**, can be raised to logical processors − 1 in the UI, and is further clamped by the engine to `[1, ProcessorCount × 2]` and the number of included runs.
+- **Excel crash recovery** — If an Excel instance dies mid-batch, the worker starts a fresh one and re-queues the in-flight run (marked Failed if it crashes Excel twice). A worker gives up only after repeated crashes with no progress.
+- **Macro-proof batch state** — Manual calculation, events off and screen updating off are re-applied before every run, and the workbook is recalculated after macros, so template macros that restore interactive settings can't slow the batch or leave outputs stale.
 - **Zombie process protection** — Tracks Excel PIDs via the Win32 `GetWindowThreadProcessId` API and guarantees cleanup on normal exit, cancellation, crashes, or unhandled exceptions.
 - **Graceful cancel & shutdown** — Closing the window during a run prompts to cancel, gives workers a short window to exit cleanly, then kills any survivors.
 - **COM resilience** — Implements `IOleMessageFilter` for automatic retry on `RPC_E_CALL_REJECTED`, plus per-run retry for transient COM faults; failures on the final attempt are surfaced as **Failed** rows rather than silently dropped.
@@ -29,7 +31,7 @@ Built with C# / WPF / .NET 10, BatchExcel drives multiple Excel instances simult
 - **Fail-fast preflight** — Path length (Excel's 218-char COM cap) and projected disk usage (worker copies + optional save artifacts) are checked *before* any Excel process is launched, so misconfigured batches die early with an actionable message.
 - **Safe CSV output** — Values starting with `=`, `+`, `-`, or `@` are neutralised against CSV/formula injection when opened in Excel/LibreOffice.
 - **Modern Fluent UI** — Windows 11 Fluent Design via [WPF-UI](https://github.com/lepoco/wpfui): `FluentWindow` with **Mica** backdrop, Excel-green accent (overrides the system accent), Fluent controls (`ToggleSwitch`, `NumberBox`, `Card`, `ProgressRing`, symbol-icon buttons & menus). The app auto-follows the Windows light/dark theme.
-- **Settings persisted** — Last-used batcher path, worker count, save-runs toggle and PDF sheet list are saved to `%AppData%\BatchExcel\settings.json` (debounced so the file isn't rewritten on every keystroke).
+- **Settings persisted** — Last-used batcher path, save-runs toggle and PDF sheet list are saved to `%AppData%\BatchExcel\settings.json` (debounced so the file isn't rewritten on every keystroke).
 
 ## Requirements
 
@@ -55,7 +57,7 @@ dotnet test
 2. **File → New Batcher from Template** to create a fresh batcher workbook from the bundled template, or **Browse…** to open an existing one (`.xlsx`).
 3. Fill in the batcher workbook in Excel (see [layout](#batcher-workbook-layout) below) and save it.
 4. Back in BatchExcel, set:
-   - **Parallel Workers** — number of simultaneous Excel instances (typically 2–8 depending on CPU cores and template complexity). Clamped to `[1, ProcessorCount × 2]`.
+   - **Parallel Workers** — number of simultaneous Excel instances. Starts at physical cores − 1 each launch; the maximum is logical processors − 1.
    - **Save Runs** (optional) — save a calculated copy of the template for each run.
    - **PDF Sheets** (optional) — comma-separated sheet names to include in a per-run PDF export.
 5. Click **▶ Start Batch**. Use **■ Cancel** at any time to stop gracefully between runs.
@@ -67,15 +69,15 @@ batch_run_260529-173057/
 ├── batch_log.log                                 # Full unbounded log
 ├── raw_output_fields.csv                         # All results, one row per run
 ├── <batcher>.xlsx                                # Copy of batcher with results written back
-└── <N>_<title>_<calculation>.xlsx                # Per-run saved copies (if Save Runs enabled)
-    <N>_<title>_<calculation>.pdf                 # Per-run PDFs (if PDF Sheets specified)
+└── <RunID>_<title>_<calculation>.xlsx            # Per-run saved copies (if Save Runs enabled)
+    <RunID>_<title>_<calculation>.pdf             # Per-run PDFs (if PDF Sheets specified)
 ```
 
 If the original batcher workbook is open in Excel when results are written back, BatchExcel logs a warning and leaves the copy in the output folder as the canonical result.
 
 ## Batcher Workbook Layout
 
-The batcher workbook must contain a sheet named **`Main`** with the following layout. Column **A** is unused (label column for the user).
+The batcher workbook must contain a sheet named **`Main`** with the following layout. Column **A** is a label column, except in the data table where it holds the Run ID.
 
 ### Calculation Workbook configuration
 
@@ -108,6 +110,7 @@ The Calculation Spreadsheet must define matching workbook-scoped Excel **defined
 
 Per-row conventions inside the data table:
 
+- **Column A** — Run ID, used in saved file names, log messages and the CSV `Run ID` column. IDs may have gaps; if blank, the 1-based row position is used.
 - **Column B** — run status. `Yes` to include, anything else (`No`, blank, etc.) to skip.
 - **Column C** — run title / identifier (used in CSV output, saved file names, and log messages). Auto-named `Run N` if blank.
 - **Column D onwards** — input values for each `in` column, results written into each `out` column.
@@ -123,7 +126,9 @@ Per-row conventions inside the data table:
 | `Skipped`   | Run excluded by `Status ≠ Yes` |
 | `Failed`    | Run included but raised an exception (after retries); output columns are blank |
 
-Columns are: **Index, Title, Status, Duration (ms), [output fields…]**. The duration column is the wall-clock calc time for each run (input write → `Application.Calculate` → macros → output read), excluding optional save / PDF export. Skipped and failed runs leave it blank.
+Columns are: **Index, Run ID, Title, Status, Duration (ms), [output fields…]**. `Index` is the 1-based row position in the data table; `Run ID` comes from column A. The duration column is the wall-clock calc time for each run (input write → `Application.Calculate` → macros → output read), excluding optional save / PDF export. Skipped and failed runs leave it blank.
+
+Excel error values in output cells are written as their error text (e.g. `#DIV/0!`, `#N/A`) in the CSV, and as real error cells in the batcher workbook.
 
 Numbers are written using `InvariantCulture` (decimal point, no thousands separator). Strings beginning with `=`, `+`, `-`, or `@` are prefixed with a single quote so they aren't interpreted as formulas when the CSV is opened in Excel/LibreOffice.
 
@@ -132,7 +137,8 @@ Numbers are written using `InvariantCulture` (decimal point, no thousands separa
 ```
 BatchExcel/
 ├── Models/
-│   └── BatchConfig.cs               # Data models (BatchConfig, FieldDefinition, BatchRun)
+│   ├── BatchConfig.cs               # Data models (BatchConfig, FieldDefinition, BatchRun)
+│   └── ExcelError.cs                # Excel error values (#DIV/0! etc.) read via COM
 ├── Services/
 │   ├── BatchEngine.cs               # Parallel batch orchestrator + log file management
 │   ├── ExcelWorker.cs               # Per-worker COM loop (cached refs, retry, RCW release)
@@ -145,6 +151,7 @@ BatchExcel/
 │   ├── CsvResultWriter.cs           # CSV output with injection protection
 │   ├── PdfExporter.cs               # Multi-sheet PDF export via Excel COM
 │   ├── FileNameSanitizer.cs         # Invalid-char replacement for output file names
+│   ├── CpuInfo.cs                   # Physical core count (default worker count)
 │   └── UserSettings.cs              # JSON-persisted user preferences
 ├── ViewModels/
 │   └── MainViewModel.cs             # MVVM ViewModel (CommunityToolkit.Mvvm)

@@ -40,7 +40,7 @@ public class CsvResultWriterTests : IDisposable
 
         string csv = ReadCsv();
         var lines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal("Index,Title,Status,Duration (ms),Sheet1_B1,Sheet1_C1", lines[0].TrimEnd('\r'));
+        Assert.Equal("Index,Run ID,Title,Status,Duration (ms),Sheet1_B1,Sheet1_C1", lines[0].TrimEnd('\r'));
     }
 
     [Fact]
@@ -55,9 +55,31 @@ public class CsvResultWriterTests : IDisposable
         string csv = ReadCsv();
 
         // Completed: duration column populated; Skipped/Failed: duration blank, output cols blank.
-        Assert.Contains("1,OK,Completed,123,1,2", csv);
-        Assert.Contains("2,Skip,Skipped,,,", csv);
-        Assert.Contains("3,Fail,Failed,,,", csv);
+        Assert.Contains("1,1,OK,Completed,123,1,2", csv);
+        Assert.Contains("2,2,Skip,Skipped,,,", csv);
+        Assert.Contains("3,3,Fail,Failed,,,", csv);
+    }
+
+    [Fact]
+    public void Write_RunIdColumn_UsesSheetRunIdAlongsideIndex()
+    {
+        var cfg = MakeConfig(
+            new BatchRun { Index = 264, RunId = "295", Include = true, Title = "Gap", Results = new object?[] { 1.0, 2.0 }, DurationMs = 9 });
+
+        CsvResultWriter.Write(_tempDir, cfg);
+
+        Assert.Contains("265,295,Gap,Completed,9,1,2", ReadCsv());
+    }
+
+    [Fact]
+    public void Write_ExcelError_WrittenAsErrorText()
+    {
+        var cfg = MakeConfig(
+            new BatchRun { Index = 0, Include = true, Title = "Err", Results = new object?[] { new ExcelError("#DIV/0!"), 2.0 }, DurationMs = 5 });
+
+        CsvResultWriter.Write(_tempDir, cfg);
+
+        Assert.Contains("1,1,Err,Completed,5,#DIV/0!,2", ReadCsv());
     }
 
     [Fact]
@@ -78,7 +100,7 @@ public class CsvResultWriterTests : IDisposable
         string csv = ReadCsv();
 
         // Duration cell is blank (",,"), output values follow.
-        Assert.Contains("1,Untimed,Completed,,7,8", csv);
+        Assert.Contains("1,1,Untimed,Completed,,7,8", csv);
     }
 
     [Fact]

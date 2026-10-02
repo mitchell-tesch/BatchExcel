@@ -1,0 +1,25 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "process",
+            "command": "dotnet",
+            "args": ["build", "${workspaceFolder}/BatchExcel/BatchExcel.csproj", "-c", "Debug"],
+            "problemMatcher": "$msCompile",
+            "group": { "kind": "build", "isDefault": true }
+        },
+        {
+            "label": "start BatchExcel on desktop",
+            "type": "process",
+            "command": "pwsh",
+            "args": [
+                "-NoProfile",
+                "-File", "${workspaceFolder}/scripts/start_on_desktop.ps1",
+                "-ExePath", "${workspaceFolder}/BatchExcel/bin/Debug/net10.0-windows/BatchExcel.exe"
+            ],
+            "dependsOn": "build",
+            "problemMatcher": []
+        }
+    ]
+}

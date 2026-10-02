@@ -1,0 +1,12 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "BatchExcel (desktop, attach)",
+            "type": "coreclr",
+            "request": "attach",
+            "processName": "BatchExcel",
+            "preLaunchTask": "start BatchExcel on desktop"
+        }
+    ]
+}
